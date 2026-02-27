@@ -3,6 +3,7 @@ package core
 import (
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 
+	"verix/resources"
 	"verix/tools"
 )
 
@@ -14,5 +15,6 @@ func NewServer() *mcp.Server {
 
 	tools.RegisterValidateSpec(server)
 	tools.RegisterRunSpec(server)
+	resources.Register(server)
 	return server
 }

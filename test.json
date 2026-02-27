@@ -1,0 +1,77 @@
+{
+  "meta": {
+    "name": "reports-api-smoke",
+    "protocol_defaults": {
+      "http": {
+        "base_url": "http://localhost:8899",
+        "headers": {
+          "User-Agent": "Apifox/1.0.0 (https://apifox.com)",
+          "Accept": "*/*",
+          "Host": "localhost:8899",
+          "Connection": "keep-alive"
+        }
+      }
+    },
+    "timeout_ms": 5000
+  },
+  "vars": {},
+  "cases": [
+    {
+      "id": "reports_success",
+      "name": "GET /api/reports success",
+      "protocol": {
+        "type": "http"
+      },
+      "request": {
+        "method": "GET",
+        "path": "/api/reports"
+      },
+      "expect": {
+        "status": 200,
+        "headers": {
+          "Content-Type": "application/json"
+        },
+        "body": {
+          "report.id": {
+            "type": "string",
+            "not_empty": true
+          },
+          "report.userId": {
+            "type": "string",
+            "not_empty": true
+          },
+          "config.configData.language": {
+            "equals": "zh-CN"
+          },
+          "refreshed": {
+            "equals": false
+          }
+        }
+      },
+      "extract": {
+        "report_id": "report.id",
+        "user_id": "report.userId"
+      }
+    },
+    {
+      "id": "reports_fail",
+      "name": "GET /api/reports fail on purpose",
+      "protocol": {
+        "type": "http"
+      },
+      "request": {
+        "method": "GET",
+        "path": "/api/reports"
+      },
+      "expect": {
+        "status": 200,
+        "body": {
+          "refreshed": {
+            "equals": true
+          }
+        }
+      },
+      "extract": {}
+    }
+  ]
+}
