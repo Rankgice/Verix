@@ -1,0 +1,1 @@
+- Compatibility decision: rely on go-sdk's structured content shutdown by returning `nil` for the `CallToolResult`, so content-only clients receive the true JSON payload without extra adapters.

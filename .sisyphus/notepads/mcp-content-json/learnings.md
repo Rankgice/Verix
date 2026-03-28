@@ -1,0 +1,1 @@
+- Letting the five DB tools return `nil` for `CallToolResult` lets go-sdk auto-fill `content` with the original structured JSON while still keeping the typed output.

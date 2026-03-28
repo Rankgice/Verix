@@ -1,0 +1,1 @@
+- No additional issues found; replacing the manual content summaries had no downstream impact beyond the handlers themselves.
