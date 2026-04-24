@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"sync"
+	"time"
 )
 
 const (
@@ -11,6 +12,11 @@ const (
 	DefaultConnectionsEnvVar = "VERIX_DB_CONNECTIONS"
 	DefaultLimit             = 100
 	DefaultTimeoutMS         = 2000
+
+	DefaultRuntimeStatePath     = ".mcp/db.json"
+	DefaultRuntimeLeaseDuration = 30 * time.Minute
+	DefaultRuntimeMaxOpenConns  = 10
+	DefaultRuntimeMaxIdleConns  = 10
 )
 
 type DBExecutor interface {
@@ -29,17 +35,28 @@ type Connection struct {
 	executor DBExecutor
 }
 
+type runtimeConnectionState struct {
+	connection  *Connection
+	databaseURL string
+	expiresAt   time.Time
+}
+
 type Manager struct {
 	conns map[string]*Connection
 
 	envVar string
 	getenv func(string) string
 	openDB func(driverName, dsn string) (*sql.DB, error)
+	now    func() time.Time
 
-	configs   map[string]ConnectionConfig
-	configErr error
-	loaded    bool
-	mu        sync.Mutex
+	runtimeStatePath string
+
+	configs       map[string]ConnectionConfig
+	configErr     error
+	loaded        bool
+	runtime       *runtimeConnectionState
+	runtimeInitMu sync.Mutex
+	mu            sync.Mutex
 }
 
 type ConnectionConfig struct {
@@ -104,7 +121,7 @@ type Index struct {
 }
 
 type ExecuteSQLRequest struct {
-	Connection string         `json:"connection"`
+	Connection string         `json:"connection,omitempty"`
 	SQL        string         `json:"sql"`
 	Params     map[string]any `json:"params,omitempty"`
 	Limit      int            `json:"limit,omitempty"`
@@ -146,6 +163,16 @@ type GetSchemaResult struct {
 
 type DescribeTableResult struct {
 	Data TableSchema `json:"data"`
+}
+
+type InitializeDBResult struct {
+	Success bool             `json:"success"`
+	Data    InitializeDBData `json:"data"`
+}
+
+type InitializeDBData struct {
+	Source    string `json:"source"`
+	StatePath string `json:"state_path"`
 }
 
 type AnalyzeQueryResult struct {

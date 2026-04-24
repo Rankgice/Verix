@@ -13,7 +13,7 @@ type GetSchemaOutput = db.GetSchemaResult
 func RegisterGetSchema(server *mcp.Server) {
 	mcp.AddTool(server, &mcp.Tool{
 		Name:        "get_schema",
-		Description: "Get a lightweight schema overview for a named MySQL connection.",
+		Description: "Get a lightweight MySQL schema overview. Omit connection to use the initialized runtime DB, or provide one to use VERIX_DB_CONNECTIONS.",
 	}, getSchemaHandler)
 }
 

@@ -29,21 +29,45 @@ func parseConnectionConfigs(envVar string, raw string) (map[string]ConnectionCon
 			return nil, fmt.Errorf("%s contains an empty connection name", envVar)
 		}
 
-		cfg.Driver = strings.ToLower(strings.TrimSpace(cfg.Driver))
-		if cfg.Driver == "" {
-			cfg.Driver = DriverMySQL
+		normalizedCfg, err := normalizeConnectionConfig(trimmedName, cfg)
+		if err != nil {
+			return nil, err
 		}
-		if cfg.Driver != DriverMySQL {
-			return nil, fmt.Errorf("connection %q uses unsupported driver %q", trimmedName, cfg.Driver)
-		}
-		if strings.TrimSpace(cfg.DSN) == "" {
-			return nil, fmt.Errorf("connection %q is missing dsn", trimmedName)
-		}
-
-		normalized[trimmedName] = cfg
+		normalized[trimmedName] = normalizedCfg
 	}
 
 	return normalized, nil
+}
+
+func normalizeConnectionConfig(name string, cfg ConnectionConfig) (ConnectionConfig, error) {
+	trimmedName := strings.TrimSpace(name)
+	if trimmedName == "" {
+		return ConnectionConfig{}, fmt.Errorf("connection name is required")
+	}
+
+	cfg.Driver = strings.ToLower(strings.TrimSpace(cfg.Driver))
+	if cfg.Driver == "" {
+		cfg.Driver = DriverMySQL
+	}
+	if cfg.Driver != DriverMySQL {
+		return ConnectionConfig{}, fmt.Errorf("connection %q uses unsupported driver %q", trimmedName, cfg.Driver)
+	}
+
+	cfg.DSN = strings.TrimSpace(cfg.DSN)
+	if cfg.DSN == "" {
+		return ConnectionConfig{}, fmt.Errorf("connection %q is missing dsn", trimmedName)
+	}
+
+	return cfg, nil
+}
+
+func runtimeConnectionConfig(databaseURL string) (ConnectionConfig, error) {
+	return normalizeConnectionConfig(runtimeConnectionName, ConnectionConfig{
+		Driver:       DriverMySQL,
+		DSN:          databaseURL,
+		MaxOpenConns: DefaultRuntimeMaxOpenConns,
+		MaxIdleConns: DefaultRuntimeMaxIdleConns,
+	})
 }
 
 func missingConnectionConfigError(envVar string, name string, hasConfiguredConnections bool) error {

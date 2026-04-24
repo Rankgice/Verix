@@ -9,7 +9,7 @@ import (
 )
 
 type ConnectionInput struct {
-	Connection string `json:"connection" jsonschema:"Database connection name from VERIX_DB_CONNECTIONS"`
+	Connection string `json:"connection,omitempty" jsonschema:"Optional database connection name from VERIX_DB_CONNECTIONS. Omit to use the initialized runtime DB."`
 }
 
 type ListTablesOutput = db.ListTablesResult
@@ -17,7 +17,7 @@ type ListTablesOutput = db.ListTablesResult
 func RegisterListTables(server *mcp.Server) {
 	mcp.AddTool(server, &mcp.Tool{
 		Name:        "list_tables",
-		Description: "List tables for a named MySQL connection.",
+		Description: "List tables for MySQL. Omit connection to use the initialized runtime DB, or provide one to use VERIX_DB_CONNECTIONS.",
 	}, listTablesHandler)
 }
 

@@ -9,7 +9,7 @@ import (
 )
 
 type ExecuteSQLInput struct {
-	Connection string         `json:"connection" jsonschema:"Database connection name from VERIX_DB_CONNECTIONS"`
+	Connection string         `json:"connection,omitempty" jsonschema:"Optional database connection name from VERIX_DB_CONNECTIONS. Omit to use the initialized runtime DB."`
 	SQL        string         `json:"sql" jsonschema:"SQL statement to execute"`
 	Params     map[string]any `json:"params,omitempty" jsonschema:"Named SQL parameters keyed by placeholder name"`
 	Limit      int            `json:"limit,omitempty" jsonschema:"Maximum SELECT rows when LIMIT is missing; defaults to 100"`
@@ -22,7 +22,7 @@ type ExecuteSQLOutput = db.ExecuteSQLResult
 func RegisterExecuteSQL(server *mcp.Server) {
 	mcp.AddTool(server, &mcp.Tool{
 		Name:        "execute_sql",
-		Description: "Execute SQL safely against a named MySQL connection.",
+		Description: "Execute SQL safely against MySQL. Omit connection to use the initialized runtime DB, or provide one to use VERIX_DB_CONNECTIONS.",
 	}, executeSQLHandler)
 }
 
