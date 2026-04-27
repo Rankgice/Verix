@@ -38,6 +38,8 @@ type Connection struct {
 type runtimeConnectionState struct {
 	connection  *Connection
 	databaseURL string
+	dbType      string
+	isReadOnly  bool
 	expiresAt   time.Time
 }
 

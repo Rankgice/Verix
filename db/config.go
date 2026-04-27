@@ -4,6 +4,8 @@ import (
 	"encoding/json"
 	"fmt"
 	"strings"
+
+	mysqldriver "github.com/go-sql-driver/mysql"
 )
 
 // VERIX_DB_CONNECTIONS is a JSON object keyed by connection name so DB tools can
@@ -61,13 +63,65 @@ func normalizeConnectionConfig(name string, cfg ConnectionConfig) (ConnectionCon
 	return cfg, nil
 }
 
-func runtimeConnectionConfig(databaseURL string) (ConnectionConfig, error) {
-	return normalizeConnectionConfig(runtimeConnectionName, ConnectionConfig{
-		Driver:       DriverMySQL,
-		DSN:          databaseURL,
+func normalizeRuntimeStateFile(state runtimeStateFile) (runtimeStateFile, error) {
+	state.DatabaseURL = strings.TrimSpace(state.DatabaseURL)
+	if state.DatabaseURL == "" {
+		return runtimeStateFile{}, fmt.Errorf("runtime database state is missing database_url")
+	}
+
+	state.DBType = strings.ToLower(strings.TrimSpace(state.DBType))
+	if state.DBType == "" {
+		state.DBType = DriverMySQL
+	}
+	if state.DBType != DriverMySQL {
+		return runtimeStateFile{}, fmt.Errorf("runtime database type %q is unsupported; only %q is supported", state.DBType, DriverMySQL)
+	}
+
+	return state, nil
+}
+
+func runtimeConnectionConfig(state runtimeStateFile) (ConnectionConfig, runtimeStateFile, error) {
+	normalizedState, err := normalizeRuntimeStateFile(state)
+	if err != nil {
+		return ConnectionConfig{}, runtimeStateFile{}, err
+	}
+
+	effectiveDSN := normalizedState.DatabaseURL
+	if normalizedState.IsReadOnly {
+		effectiveDSN, err = runtimeReadOnlyDSN(effectiveDSN, normalizedState.DBType)
+		if err != nil {
+			return ConnectionConfig{}, runtimeStateFile{}, err
+		}
+	}
+
+	cfg, err := normalizeConnectionConfig(runtimeConnectionName, ConnectionConfig{
+		Driver:       normalizedState.DBType,
+		DSN:          effectiveDSN,
 		MaxOpenConns: DefaultRuntimeMaxOpenConns,
 		MaxIdleConns: DefaultRuntimeMaxIdleConns,
 	})
+	if err != nil {
+		return ConnectionConfig{}, runtimeStateFile{}, err
+	}
+
+	return cfg, normalizedState, nil
+}
+
+func runtimeReadOnlyDSN(databaseURL string, dbType string) (string, error) {
+	switch dbType {
+	case DriverMySQL:
+		cfg, err := mysqldriver.ParseDSN(databaseURL)
+		if err != nil {
+			return "", fmt.Errorf("parse mysql dsn: %w", err)
+		}
+		if cfg.Params == nil {
+			cfg.Params = make(map[string]string)
+		}
+		cfg.Params["transaction_read_only"] = "1"
+		return cfg.FormatDSN(), nil
+	default:
+		return "", fmt.Errorf("runtime database type %q is unsupported for readonly mode", dbType)
+	}
 }
 
 func missingConnectionConfigError(envVar string, name string, hasConfiguredConnections bool) error {

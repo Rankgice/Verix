@@ -20,6 +20,8 @@ const (
 
 type runtimeStateFile struct {
 	DatabaseURL string `json:"database_url"`
+	DBType      string `json:"db_type"`
+	IsReadOnly  bool   `json:"is_readonly"`
 }
 
 type tableLister interface {
@@ -130,7 +132,7 @@ func (m *Manager) GetExecutor(ctx context.Context, name string) (DBExecutor, err
 	return conn.executor, nil
 }
 
-func (m *Manager) InitializeRuntimeConnection(ctx context.Context, databaseURL string) (*InitializeDBResult, error) {
+func (m *Manager) InitializeRuntimeConnection(ctx context.Context, databaseURL string, dbType string, isReadOnly bool) (*InitializeDBResult, error) {
 	ctx = normalizeContext(ctx)
 	trimmedDatabaseURL := strings.TrimSpace(databaseURL)
 	if trimmedDatabaseURL == "" {
@@ -149,7 +151,11 @@ func (m *Manager) InitializeRuntimeConnection(ctx context.Context, databaseURL s
 	m.runtimeInitMu.Lock()
 	defer m.runtimeInitMu.Unlock()
 
-	cfg, err := runtimeConnectionConfig(trimmedDatabaseURL)
+	cfg, state, err := runtimeConnectionConfig(runtimeStateFile{
+		DatabaseURL: trimmedDatabaseURL,
+		DBType:      dbType,
+		IsReadOnly:  isReadOnly,
+	})
 	if err != nil {
 		return nil, err
 	}
@@ -158,12 +164,12 @@ func (m *Manager) InitializeRuntimeConnection(ctx context.Context, databaseURL s
 	if err != nil {
 		return nil, err
 	}
-	if err := m.persistRuntimeState(cfg.DSN); err != nil {
+	if err := m.persistRuntimeState(state); err != nil {
 		m.closeConnection(conn)
 		return nil, err
 	}
 
-	m.installRuntimeConnection(conn, cfg.DSN)
+	m.installRuntimeConnection(conn, state)
 	return &InitializeDBResult{
 		Success: true,
 		Data: InitializeDBData{
@@ -360,12 +366,12 @@ func (m *Manager) openConnection(ctx context.Context, name string, cfg Connectio
 }
 
 func (m *Manager) loadRuntimeConnectionFromFile(ctx context.Context) (*Connection, error) {
-	databaseURL, err := m.readPersistedRuntimeDatabaseURL()
+	state, err := m.readPersistedRuntimeState()
 	if err != nil {
 		return nil, err
 	}
 
-	cfg, err := runtimeConnectionConfig(databaseURL)
+	cfg, state, err := runtimeConnectionConfig(state)
 	if err != nil {
 		return nil, fmt.Errorf("initialize runtime database from %s: %w", m.runtimeFilePath(), err)
 	}
@@ -374,40 +380,40 @@ func (m *Manager) loadRuntimeConnectionFromFile(ctx context.Context) (*Connectio
 	if err != nil {
 		return nil, err
 	}
-	m.installRuntimeConnection(conn, cfg.DSN)
+	m.installRuntimeConnection(conn, state)
 	return conn, nil
 }
 
-func (m *Manager) readPersistedRuntimeDatabaseURL() (string, error) {
+func (m *Manager) readPersistedRuntimeState() (runtimeStateFile, error) {
 	path := m.runtimeFilePath()
 	raw, err := os.ReadFile(path)
 	if err != nil {
 		if errors.Is(err, os.ErrNotExist) {
-			return "", fmt.Errorf("runtime database is not initialized; call initialize_db with database_url or ensure %s exists", path)
+			return runtimeStateFile{}, fmt.Errorf("runtime database is not initialized; call initialize_db with database_url or ensure %s exists", path)
 		}
-		return "", fmt.Errorf("read runtime database state %q: %w", path, err)
+		return runtimeStateFile{}, fmt.Errorf("read runtime database state %q: %w", path, err)
 	}
 
 	var state runtimeStateFile
 	if err := json.Unmarshal(raw, &state); err != nil {
-		return "", fmt.Errorf("parse runtime database state %q: %w", path, err)
+		return runtimeStateFile{}, fmt.Errorf("parse runtime database state %q: %w", path, err)
 	}
 
-	databaseURL := strings.TrimSpace(state.DatabaseURL)
-	if databaseURL == "" {
-		return "", fmt.Errorf("runtime database state %q is missing database_url", path)
+	normalizedState, err := normalizeRuntimeStateFile(state)
+	if err != nil {
+		return runtimeStateFile{}, fmt.Errorf("invalid runtime database state %q: %w", path, err)
 	}
-	return databaseURL, nil
+	return normalizedState, nil
 }
 
-func (m *Manager) persistRuntimeState(databaseURL string) error {
+func (m *Manager) persistRuntimeState(state runtimeStateFile) error {
 	path := m.runtimeFilePath()
 	dir := filepath.Dir(path)
 	if err := os.MkdirAll(dir, 0o700); err != nil {
 		return fmt.Errorf("create runtime database state directory %q: %w", dir, err)
 	}
 
-	raw, err := json.MarshalIndent(runtimeStateFile{DatabaseURL: databaseURL}, "", "  ")
+	raw, err := json.MarshalIndent(state, "", "  ")
 	if err != nil {
 		return fmt.Errorf("marshal runtime database state: %w", err)
 	}
@@ -419,12 +425,14 @@ func (m *Manager) persistRuntimeState(databaseURL string) error {
 	return nil
 }
 
-func (m *Manager) installRuntimeConnection(conn *Connection, databaseURL string) {
+func (m *Manager) installRuntimeConnection(conn *Connection, state runtimeStateFile) {
 	m.mu.Lock()
 	oldConn := m.clearRuntimeConnectionLocked()
 	m.runtime = &runtimeConnectionState{
 		connection:  conn,
-		databaseURL: databaseURL,
+		databaseURL: state.DatabaseURL,
+		dbType:      state.DBType,
+		isReadOnly:  state.IsReadOnly,
 		expiresAt:   m.currentTime().Add(DefaultRuntimeLeaseDuration),
 	}
 	m.mu.Unlock()

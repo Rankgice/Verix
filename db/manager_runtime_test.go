@@ -11,6 +11,8 @@ import (
 	"sync/atomic"
 	"testing"
 	"time"
+
+	mysqldriver "github.com/go-sql-driver/mysql"
 )
 
 func TestInitializeRuntimeConnectionPersistsFileAndInstallsRuntimeState(t *testing.T) {
@@ -27,14 +29,12 @@ func TestInitializeRuntimeConnectionPersistsFileAndInstallsRuntimeState(t *testi
 		if driverName != DriverMySQL {
 			t.Fatalf("unexpected driver: %s", driverName)
 		}
-		if dsn != wantDSN {
-			t.Fatalf("unexpected dsn: %s", dsn)
-		}
+		assertMySQLReadOnlyDSN(t, dsn, wantDSN)
 		return newPingOnlyDB(nil, &pingCount, nil), nil
 	}
 	t.Cleanup(func() { closeManagerConnections(manager) })
 
-	out, err := manager.InitializeRuntimeConnection(context.Background(), wantDSN)
+	out, err := manager.InitializeRuntimeConnection(context.Background(), wantDSN, DriverMySQL, true)
 	if err != nil {
 		t.Fatalf("InitializeRuntimeConnection returned error: %v", err)
 	}
@@ -60,12 +60,24 @@ func TestInitializeRuntimeConnectionPersistsFileAndInstallsRuntimeState(t *testi
 	if persisted.DatabaseURL != wantDSN {
 		t.Fatalf("unexpected persisted database_url: %s", persisted.DatabaseURL)
 	}
+	if persisted.DBType != DriverMySQL {
+		t.Fatalf("unexpected persisted db_type: %s", persisted.DBType)
+	}
+	if !persisted.IsReadOnly {
+		t.Fatal("expected persisted is_readonly to be true")
+	}
 
 	if manager.runtime == nil {
 		t.Fatal("expected runtime state to be installed")
 	}
 	if manager.runtime.databaseURL != wantDSN {
 		t.Fatalf("unexpected runtime database_url: %s", manager.runtime.databaseURL)
+	}
+	if manager.runtime.dbType != DriverMySQL {
+		t.Fatalf("unexpected runtime db_type: %s", manager.runtime.dbType)
+	}
+	if !manager.runtime.isReadOnly {
+		t.Fatal("expected runtime isReadOnly to be true")
 	}
 	if !manager.runtime.expiresAt.Equal(now.Add(DefaultRuntimeLeaseDuration)) {
 		t.Fatalf("unexpected lease expiry: %s", manager.runtime.expiresAt)
@@ -87,14 +99,10 @@ func TestInitializeRuntimeConnectionLoadsPersistedStateWhenDatabaseURLEmpty(t *t
 	manager := NewManagerFromEnv(DefaultConnectionsEnvVar, func(string) string { return "" })
 	manager.runtimeStatePath = filepath.Join(t.TempDir(), ".mcp", "db.json")
 
-	raw, err := json.Marshal(runtimeStateFile{DatabaseURL: wantDSN})
-	if err != nil {
-		t.Fatalf("Marshal returned error: %v", err)
-	}
 	if err := os.MkdirAll(filepath.Dir(manager.runtimeStatePath), 0o700); err != nil {
 		t.Fatalf("MkdirAll returned error: %v", err)
 	}
-	if err := os.WriteFile(manager.runtimeStatePath, raw, 0o600); err != nil {
+	if err := os.WriteFile(manager.runtimeStatePath, []byte("{\n  \"database_url\": \""+wantDSN+"\"\n}\n"), 0o600); err != nil {
 		t.Fatalf("WriteFile returned error: %v", err)
 	}
 
@@ -110,7 +118,7 @@ func TestInitializeRuntimeConnectionLoadsPersistedStateWhenDatabaseURLEmpty(t *t
 	}
 	t.Cleanup(func() { closeManagerConnections(manager) })
 
-	out, err := manager.InitializeRuntimeConnection(context.Background(), "")
+	out, err := manager.InitializeRuntimeConnection(context.Background(), "", "", false)
 	if err != nil {
 		t.Fatalf("InitializeRuntimeConnection returned error: %v", err)
 	}
@@ -122,6 +130,12 @@ func TestInitializeRuntimeConnectionLoadsPersistedStateWhenDatabaseURLEmpty(t *t
 	}
 	if manager.runtime.databaseURL != wantDSN {
 		t.Fatalf("unexpected runtime database_url: %s", manager.runtime.databaseURL)
+	}
+	if manager.runtime.dbType != DriverMySQL {
+		t.Fatalf("unexpected runtime db_type: %s", manager.runtime.dbType)
+	}
+	if manager.runtime.isReadOnly {
+		t.Fatal("expected runtime isReadOnly to default to false")
 	}
 	if got := atomic.LoadInt32(&pingCount); got != 1 {
 		t.Fatalf("unexpected ping count: %d", got)
@@ -196,7 +210,7 @@ func TestGetConnectionReloadsExpiredRuntimeStateFromFile(t *testing.T) {
 	manager := NewManagerFromEnv(DefaultConnectionsEnvVar, func(string) string { return "" })
 	manager.runtimeStatePath = filepath.Join(t.TempDir(), ".mcp", "db.json")
 
-	raw, err := json.Marshal(runtimeStateFile{DatabaseURL: persistedDSN})
+	raw, err := json.Marshal(runtimeStateFile{DatabaseURL: persistedDSN, DBType: DriverMySQL, IsReadOnly: true})
 	if err != nil {
 		t.Fatalf("Marshal returned error: %v", err)
 	}
@@ -227,9 +241,7 @@ func TestGetConnectionReloadsExpiredRuntimeStateFromFile(t *testing.T) {
 		if driverName != DriverMySQL {
 			t.Fatalf("unexpected driver: %s", driverName)
 		}
-		if dsn != persistedDSN {
-			t.Fatalf("unexpected dsn: %s", dsn)
-		}
+		assertMySQLReadOnlyDSN(t, dsn, persistedDSN)
 		return newPingOnlyDB(nil, &pingCount, nil), nil
 	}
 	t.Cleanup(func() { closeManagerConnections(manager) })
@@ -246,6 +258,12 @@ func TestGetConnectionReloadsExpiredRuntimeStateFromFile(t *testing.T) {
 	}
 	if manager.runtime.databaseURL != persistedDSN {
 		t.Fatalf("unexpected runtime database_url: %s", manager.runtime.databaseURL)
+	}
+	if manager.runtime.dbType != DriverMySQL {
+		t.Fatalf("unexpected runtime db_type: %s", manager.runtime.dbType)
+	}
+	if !manager.runtime.isReadOnly {
+		t.Fatal("expected runtime isReadOnly to be true")
 	}
 	if !manager.runtime.expiresAt.Equal(now.Add(DefaultRuntimeLeaseDuration)) {
 		t.Fatalf("unexpected lease expiry: %s", manager.runtime.expiresAt)
@@ -264,7 +282,7 @@ func TestGetConnectionColdStartSerializesRuntimeLoad(t *testing.T) {
 	manager := NewManagerFromEnv(DefaultConnectionsEnvVar, func(string) string { return "" })
 	manager.runtimeStatePath = filepath.Join(t.TempDir(), ".mcp", "db.json")
 
-	raw, err := json.Marshal(runtimeStateFile{DatabaseURL: persistedDSN})
+	raw, err := json.Marshal(runtimeStateFile{DatabaseURL: persistedDSN, DBType: DriverMySQL, IsReadOnly: false})
 	if err != nil {
 		t.Fatalf("Marshal returned error: %v", err)
 	}
@@ -380,6 +398,28 @@ func TestGetConnectionUsesNamedEnvConnectionWhenProvided(t *testing.T) {
 	}
 	if conn.Driver != DriverMySQL {
 		t.Fatalf("unexpected connection driver: %s", conn.Driver)
+	}
+}
+
+func assertMySQLReadOnlyDSN(t *testing.T, gotDSN string, wantBaseDSN string) {
+	t.Helper()
+
+	parsed, err := mysqldriver.ParseDSN(gotDSN)
+	if err != nil {
+		t.Fatalf("ParseDSN returned error: %v", err)
+	}
+	baseParsed, err := mysqldriver.ParseDSN(wantBaseDSN)
+	if err != nil {
+		t.Fatalf("ParseDSN base returned error: %v", err)
+	}
+	if parsed.FormatDSN() == baseParsed.FormatDSN() {
+		t.Fatalf("expected readonly dsn to differ from base dsn: %s", gotDSN)
+	}
+	if parsed.Params["transaction_read_only"] != "1" {
+		t.Fatalf("expected transaction_read_only=1, got %q", parsed.Params["transaction_read_only"])
+	}
+	if baseParsed.Params["parseTime"] == "true" && parsed.Params["parseTime"] != "true" {
+		t.Fatalf("expected parseTime=true to be preserved, got %q", parsed.Params["parseTime"])
 	}
 }
 
