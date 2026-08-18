@@ -24,13 +24,13 @@ type PluginListOutput struct {
 	Plugins []PluginSummary `json:"plugins"`
 }
 type PluginDescribeOutput struct {
-	Plugin *json.RawMessage `json:"plugin"`
+	Plugin any `json:"plugin"`
 }
 type PluginCallOutput struct {
-	Plugin string          `json:"plugin"`
-	Method string          `json:"method"`
-	Result json.RawMessage `json:"result,omitempty"`
-	Meta   map[string]any  `json:"meta,omitempty"`
+	Plugin string         `json:"plugin"`
+	Method string         `json:"method"`
+	Result any            `json:"result,omitempty"`
+	Meta   map[string]any `json:"meta,omitempty"`
 }
 
 // RegisterMCPTools 将插件管理能力注册为 MCP Tools。
@@ -54,9 +54,7 @@ func (m *Manager) describeHandler(ctx context.Context, _ *mcp.CallToolRequest, i
 	if err != nil {
 		return nil, PluginDescribeOutput{}, err
 	}
-	raw, _ := json.Marshal(out)
-	rawMessage := json.RawMessage(raw)
-	return nil, PluginDescribeOutput{Plugin: &rawMessage}, nil
+	return nil, PluginDescribeOutput{Plugin: out}, nil
 }
 
 // callHandler 处理 plugin_call MCP Tool 请求并转发到目标插件。
@@ -69,5 +67,9 @@ func (m *Manager) callHandler(ctx context.Context, _ *mcp.CallToolRequest, in Pl
 	if err != nil {
 		return nil, PluginCallOutput{}, err
 	}
-	return nil, PluginCallOutput{Plugin: in.Plugin, Method: in.Method, Result: result, Meta: map[string]any{"duration_ms": 0}}, nil
+	var resultAny any
+	if len(result) > 0 {
+		_ = json.Unmarshal(result, &resultAny)
+	}
+	return nil, PluginCallOutput{Plugin: in.Plugin, Method: in.Method, Result: resultAny, Meta: map[string]any{"duration_ms": 0}}, nil
 }
