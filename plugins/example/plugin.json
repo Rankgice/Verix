@@ -1,0 +1,56 @@
+{
+  "manifest_version": "1",
+  "protocol_version": "1.0",
+  "id": "com.verix.example",
+  "name": "example",
+  "display_name": "Example Plugin",
+  "version": "1.0.0",
+  "description": "Example plugin for Verix extension testing",
+  "runtime": {
+    "command": "example-plugin.exe",
+    "activation": "lazy",
+    "startup_timeout_ms": 5000,
+    "call_timeout_ms": 30000,
+    "shutdown_timeout_ms": 3000,
+    "max_concurrent_calls": 4,
+    "restart_policy": "on_failure",
+    "max_restarts": 3
+  },
+  "permissions": [
+    {
+      "name": "host.log",
+      "reason": "Write structured plugin logs"
+    }
+  ],
+  "methods": [
+    {
+      "name": "echo",
+      "description": "Echo a message",
+      "input_schema": {
+        "type": "object",
+        "properties": {
+          "message": {
+            "type": "string"
+          }
+        },
+        "required": ["message"],
+        "additionalProperties": false
+      },
+      "output_schema": {
+        "type": "object",
+        "properties": {
+          "message": {
+            "type": "string"
+          }
+        },
+        "required": ["message"],
+        "additionalProperties": false
+      },
+      "flags": {
+        "read_only": true,
+        "idempotent": true,
+        "supports_cancellation": true
+      }
+    }
+  ]
+}
