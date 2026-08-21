@@ -77,12 +77,23 @@ func New(opts Options) *Manager {
 		opts.HostVersion = "0.1.0"
 	}
 	if opts.RootDir == "" {
-		opts.RootDir = "plugins"
+		opts.RootDir = defaultRootDir()
 	}
 	if opts.Config == nil {
 		opts.Config = map[string]json.RawMessage{}
 	}
 	return &Manager{opts: opts, plugins: map[string]*instance{}, storage: map[string]map[string]json.RawMessage{}}
+}
+
+// defaultRootDir 返回默认插件目录：优先使用可执行文件所在目录下的 plugins 子目录。
+// 这样把 verix.exe 和 plugins 放在同一目录时，即使 MCP 客户端的工作目录不同，
+// 也能在不设置 VERIX_PLUGIN_DIR 的情况下自动发现插件。
+func defaultRootDir() string {
+	exe, err := os.Executable()
+	if err != nil {
+		return "plugins"
+	}
+	return filepath.Join(filepath.Dir(exe), "plugins")
 }
 
 // Discover 扫描插件根目录，读取并校验所有 plugin.json。
