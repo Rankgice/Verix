@@ -1,0 +1,226 @@
+// Package {{.PackageName}} 由 Verix DAO 生成器自动生成。
+package {{.PackageName}}
+
+{{.ImportBlock}}
+
+// {{.EntityName}} {{.Comment}}模型
+type {{.EntityName}} struct {
+{{- range .Fields}}
+	{{.GoName}} {{.GoType}} `gorm:"{{.GormTag}}" json:"{{.JSONName}}{{if .OmitEmpty}},omitempty{{end}}"`
+{{- end}}
+}
+
+// TableName 指定表名
+func ({{.EntityName}}) TableName() string {
+	return "{{.TableName}}"
+}
+
+{{- if .SortFields}}
+
+const (
+{{- range .SortFields}}
+	{{$.EntityName}}OrderField{{.GoName}} = "{{.Column}}"
+{{- end}}
+)
+
+var {{.LowerEntityName}}OrderFieldMap = map[string]struct{}{
+{{- range .SortFields}}
+	{{$.EntityName}}OrderField{{.GoName}}: {},
+{{- end}}
+}
+{{- end}}
+
+// {{.EntityName}}QueryParams {{.Comment}}查询参数
+type {{.EntityName}}QueryParams struct {
+{{- if .PrimaryKey}}
+	{{.PrimaryKey.GoName}}     {{.PrimaryKey.GoType}} `json:"{{.PrimaryKey.JSONName}}"`
+	{{.PrimaryKey.GoName}}List []{{.PrimaryKey.GoType}} `json:"{{.PrimaryKey.JSONName}}_list"`
+{{- end}}
+{{- range .QueryStringFields}}
+	{{.GoName}} string `json:"{{.JSONName}}"`
+{{- end}}
+{{- range .TimeFields}}
+	{{.GoName}}Start time.Time `json:"{{.JSONStart}}"`
+	{{.GoName}}End   time.Time `json:"{{.JSONEnd}}"`
+{{- end}}
+	Page     int    `json:"page"`
+	PageSize int    `json:"page_size"`
+	SortBy   string `json:"sort_by"`
+	IsDesc   bool   `json:"is_desc"`
+}
+
+// {{.EntityName}}DeleteParams {{.Comment}}删除参数
+type {{.EntityName}}DeleteParams struct {
+{{- if .PrimaryKey}}
+	{{.PrimaryKey.GoName}}     *{{.PrimaryKey.GoType}} `json:"{{.PrimaryKey.JSONName}}"`
+	{{.PrimaryKey.GoName}}List []{{.PrimaryKey.GoType}} `json:"{{.PrimaryKey.JSONName}}_list"`
+{{- end}}
+}
+
+// {{.EntityName}}UpdateParams {{.Comment}}更新参数
+type {{.EntityName}}UpdateParams struct {
+{{- if .PrimaryKey}}
+	{{.PrimaryKey.GoName}} {{.PrimaryKey.GoType}} `gorm:"{{.PrimaryKey.GormTag}}" json:"{{.PrimaryKey.JSONName}}"`
+{{- end}}
+{{- range .UpdatableFields}}
+	{{.GoName}} *{{.GoType}} `gorm:"{{.GormTag}}" json:"{{.JSONName}}{{if .OmitEmpty}},omitempty{{end}}"`
+{{- end}}
+}
+
+// {{.EntityName}}Model {{.Comment}}模型
+type {{.EntityName}}Model struct {
+	db *gorm.DB
+}
+
+// New{{.EntityName}}Model 创建{{.Comment}}模型
+func New{{.EntityName}}Model(db *gorm.DB) *{{.EntityName}}Model {
+	return &{{.EntityName}}Model{db: db}
+}
+
+// Create 创建{{.Comment}}
+func (m *{{.EntityName}}Model) Create({{.VarName}} *{{.EntityName}}) error {
+	return m.CreateWithTx(nil, {{.VarName}})
+}
+
+// CreateWithTx 在事务中创建{{.Comment}}
+func (m *{{.EntityName}}Model) CreateWithTx(tx *gorm.DB, {{.VarName}} *{{.EntityName}}) error {
+	db := m.db
+	if tx != nil {
+		db = tx
+	}
+	return db.Create({{.VarName}}).Error
+}
+
+{{- if .PrimaryKey}}
+
+// GetBy{{.PrimaryKey.GoName}} 根据{{.PrimaryKey.Column}}查询{{.Comment}}
+func (m *{{.EntityName}}Model) GetBy{{.PrimaryKey.GoName}}({{.PrimaryKey.VarName}} {{.PrimaryKey.GoType}}) (*{{.EntityName}}, error) {
+	var {{$.VarName}} {{$.EntityName}}
+	if err := m.db.First(&{{$.VarName}}, {{.PrimaryKey.VarName}}).Error; err != nil {
+		if err == gorm.ErrRecordNotFound {
+			return nil, nil
+		}
+		return nil, err
+	}
+	return &{{$.VarName}}, nil
+}
+{{- end}}
+
+// ListByParam 获取{{.Comment}}列表
+func (m *{{.EntityName}}Model) ListByParam(params *{{.EntityName}}QueryParams) ([]*{{.EntityName}}, int64, error) {
+	return m.ListByParamWithTx(nil, params)
+}
+
+// ListByParamWithTx 在事务中获取{{.Comment}}列表
+func (m *{{.EntityName}}Model) ListByParamWithTx(tx *gorm.DB, params *{{.EntityName}}QueryParams) ([]*{{.EntityName}}, int64, error) {
+	db := m.db
+	if tx != nil {
+		db = tx
+	}
+	db = db.Model(&{{.EntityName}}{})
+{{- if .PrimaryKey}}
+	if params.{{.PrimaryKey.GoName}} != {{.PrimaryKey.ZeroValue}} {
+		db = db.Where("{{.PrimaryKey.Column}} = ?", params.{{.PrimaryKey.GoName}})
+	} else if len(params.{{.PrimaryKey.GoName}}List) > 0 {
+		db = db.Where("{{.PrimaryKey.Column}} IN ?", params.{{.PrimaryKey.GoName}}List)
+	}
+{{- end}}
+{{- range .QueryStringFields}}
+	if params.{{.GoName}} != "" {
+		db = db.Where("{{.Column}} LIKE ?", "%"+params.{{.GoName}}+"%")
+	}
+{{- end}}
+{{- range .TimeFields}}
+	if !params.{{.GoName}}Start.IsZero() {
+		db = db.Where("{{.Column}} >= ?", params.{{.GoName}}Start)
+	}
+	if !params.{{.GoName}}End.IsZero() {
+		db = db.Where("{{.Column}} <= ?", params.{{.GoName}}End)
+	}
+{{- end}}
+	var total int64
+	if params.Page > 0 && params.PageSize > 0 {
+		if err := db.Count(&total).Error; err != nil {
+			return nil, 0, err
+		}
+		db = db.Offset((params.Page - 1) * params.PageSize).Limit(params.PageSize)
+	}
+{{- if .SortFields}}
+	sortBy := {{.EntityName}}OrderField{{(index .SortFields 0).GoName}}
+	if _, ok := {{.LowerEntityName}}OrderFieldMap[params.SortBy]; ok {
+		sortBy = params.SortBy
+	}
+	db = db.Order(clause.OrderByColumn{
+		Column: clause.Column{Name: sortBy},
+		Desc:   params.IsDesc,
+	})
+{{- end}}
+	var {{.VarNameList}} []*{{.EntityName}}
+	if err := db.Find(&{{.VarNameList}}).Error; err != nil {
+		return nil, 0, err
+	}
+	if total == 0 {
+		total = int64(len({{.VarNameList}}))
+	}
+	return {{.VarNameList}}, total, nil
+}
+
+// UpdateByParam 更新{{.Comment}}
+func (m *{{.EntityName}}Model) UpdateByParam(params *{{.EntityName}}UpdateParams) (int64, error) {
+	return m.UpdateByParamWithTx(nil, params)
+}
+
+// UpdateByParamWithTx 在事务中更新{{.Comment}}
+func (m *{{.EntityName}}Model) UpdateByParamWithTx(tx *gorm.DB, params *{{.EntityName}}UpdateParams) (int64, error) {
+	db := m.db
+	if tx != nil {
+		db = tx
+	}
+{{- if .PrimaryKey}}
+	res := db.Model(&{{.EntityName}}{{"{"}}{{.PrimaryKey.GoName}}: params.{{.PrimaryKey.GoName}}{{"}"}}).Updates(params)
+{{- else}}
+	res := db.Model(&{{.EntityName}}{}).Updates(params)
+{{- end}}
+	return res.RowsAffected, res.Error
+}
+
+// DeleteByParam 删除{{.Comment}}
+func (m *{{.EntityName}}Model) DeleteByParam(params *{{.EntityName}}DeleteParams) (int64, error) {
+	return m.DeleteByParamWithTx(nil, params)
+}
+
+// DeleteByParamWithTx 在事务中删除{{.Comment}}
+func (m *{{.EntityName}}Model) DeleteByParamWithTx(tx *gorm.DB, params *{{.EntityName}}DeleteParams) (int64, error) {
+	db := m.db
+	if tx != nil {
+		db = tx
+	}
+	db = db.Model(&{{.EntityName}}{})
+{{- if .PrimaryKey}}
+	if params.{{.PrimaryKey.GoName}} != nil {
+		db = db.Where("{{.PrimaryKey.Column}} = ?", *params.{{.PrimaryKey.GoName}})
+	} else if len(params.{{.PrimaryKey.GoName}}List) > 0 {
+		db = db.Where("{{.PrimaryKey.Column}} IN ?", params.{{.PrimaryKey.GoName}}List)
+	}
+{{- end}}
+	res := db.Delete(&{{.EntityName}}{})
+	return res.RowsAffected, res.Error
+}
+
+{{- if .PrimaryKey}}
+
+// BatchDelete 批量删除{{.Comment}}
+func (m *{{.EntityName}}Model) BatchDelete(ids []{{.PrimaryKey.GoType}}) (int64, error) {
+	return m.BatchDeleteWithTx(nil, ids)
+}
+
+// BatchDeleteWithTx 在事务中批量删除{{.Comment}}
+func (m *{{.EntityName}}Model) BatchDeleteWithTx(tx *gorm.DB, ids []{{.PrimaryKey.GoType}}) (int64, error) {
+	db := m.db
+	if tx != nil {
+		db = tx
+	}
+	res := db.Where("{{.PrimaryKey.Column}} IN ?", ids).Delete(&{{.EntityName}}{})
+	return res.RowsAffected, res.Error
+}
+{{- end}}
