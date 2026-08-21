@@ -56,6 +56,7 @@ type TableModel struct {
 	Fields            []FieldModel     // entity 的全部字段（含主键）
 	SortFields        []FieldModel     // 可排序字段（主键 + 可排序普通字段）
 	QueryStringFields []FieldModel     // 用于 LIKE 过滤的字符串字段
+	IntegerFields     []FieldModel     // 用于等值和 IN 过滤的整形字段（不含主键）
 	TimeFields        []TimeRangeField // 用于范围过滤的时间字段
 	UpdatableFields   []FieldModel     // 更新参数里的非主键字段
 }
@@ -177,6 +178,18 @@ func isSortable(dataType string) bool {
 	return true
 }
 
+// isIntegerType 判断字段是否为整形类型。
+// tinyint(1) 会映射为 bool，因此不作为整形过滤字段。
+func isIntegerType(dataType, columnType string) bool {
+	switch strings.ToLower(dataType) {
+	case "bigint", "int", "integer", "mediumint", "smallint":
+		return true
+	case "tinyint":
+		return !strings.HasPrefix(strings.ToLower(columnType), "tinyint(1)")
+	}
+	return false
+}
+
 // isLikeQueryable 判断字符串字段是否适合 LIKE 过滤。
 func isLikeQueryable(dataType string) bool {
 	switch strings.ToLower(dataType) {
@@ -295,6 +308,9 @@ func buildTableModel(packageName, table string, columns []columnInfo) *TableMode
 		}
 		if isLikeQueryable(c.DataType) {
 			m.QueryStringFields = append(m.QueryStringFields, f)
+		}
+		if !isPrimary && isIntegerType(c.DataType, c.ColumnType) {
+			m.IntegerFields = append(m.IntegerFields, f)
 		}
 		if isTimeType(c.DataType) {
 			m.TimeFields = append(m.TimeFields, TimeRangeField{

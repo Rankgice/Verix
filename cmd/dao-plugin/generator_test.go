@@ -32,6 +32,29 @@ func TestToGoName(t *testing.T) {
 	}
 }
 
+func TestIntegerFieldSelection(t *testing.T) {
+	tests := []struct {
+		dataType   string
+		columnType string
+		want       bool
+	}{
+		{dataType: "bigint", columnType: "bigint", want: true},
+		{dataType: "int", columnType: "int", want: true},
+		{dataType: "integer", columnType: "integer", want: true},
+		{dataType: "mediumint", columnType: "mediumint", want: true},
+		{dataType: "smallint", columnType: "smallint", want: true},
+		{dataType: "tinyint", columnType: "tinyint(4)", want: true},
+		{dataType: "tinyint", columnType: "tinyint(1)", want: false},
+		{dataType: "decimal", columnType: "decimal(10,2)", want: false},
+		{dataType: "varchar", columnType: "varchar(255)", want: false},
+	}
+	for _, tt := range tests {
+		if got := isIntegerType(tt.dataType, tt.columnType); got != tt.want {
+			t.Errorf("isIntegerType(%q, %q) = %v, want %v", tt.dataType, tt.columnType, got, tt.want)
+		}
+	}
+}
+
 func TestGoTypeFor(t *testing.T) {
 	cases := map[string]string{
 		"bigint":   "int64",
@@ -78,6 +101,17 @@ func TestRenderUserGroupModel(t *testing.T) {
 		`"gorm.io/gorm/clause"`,
 		`"time"`,
 		"gorm.ErrRecordNotFound",
+		// 整形普通字段进入 QueryParams：单值 + List，并生成等值/IN 过滤。
+		"GroupId     int64",
+		"GroupIdList []int64",
+		"if params.GroupId != 0",
+		`db.Where("group_id = ?", params.GroupId)`,
+		"len(params.GroupIdList) > 0",
+		`db.Where("group_id IN ?", params.GroupIdList)`,
+		// 整形普通字段进入 DeleteParams：指针单值 + List，并生成等值/IN 删除条件。
+		"GroupId     *int64",
+		"if params.GroupId != nil",
+		`db.Where("group_id = ?", *params.GroupId)`,
 	}
 	for _, want := range wants {
 		if !strings.Contains(code, want) {

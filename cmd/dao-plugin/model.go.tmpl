@@ -39,6 +39,10 @@ type {{.EntityName}}QueryParams struct {
 {{- range .QueryStringFields}}
 	{{.GoName}} string `json:"{{.JSONName}}"`
 {{- end}}
+{{- range .IntegerFields}}
+	{{.GoName}}     {{.GoType}} `json:"{{.JSONName}}"`
+	{{.GoName}}List []{{.GoType}} `json:"{{.JSONName}}_list"`
+{{- end}}
 {{- range .TimeFields}}
 	{{.GoName}}Start time.Time `json:"{{.JSONStart}}"`
 	{{.GoName}}End   time.Time `json:"{{.JSONEnd}}"`
@@ -54,6 +58,10 @@ type {{.EntityName}}DeleteParams struct {
 {{- if .PrimaryKey}}
 	{{.PrimaryKey.GoName}}     *{{.PrimaryKey.GoType}} `json:"{{.PrimaryKey.JSONName}}"`
 	{{.PrimaryKey.GoName}}List []{{.PrimaryKey.GoType}} `json:"{{.PrimaryKey.JSONName}}_list"`
+{{- end}}
+{{- range .IntegerFields}}
+	{{.GoName}}     *{{.GoType}} `json:"{{.JSONName}}"`
+	{{.GoName}}List []{{.GoType}} `json:"{{.JSONName}}_list"`
 {{- end}}
 }
 
@@ -130,6 +138,13 @@ func (m *{{.EntityName}}Model) ListByParamWithTx(tx *gorm.DB, params *{{.EntityN
 		db = db.Where("{{.Column}} LIKE ?", "%"+params.{{.GoName}}+"%")
 	}
 {{- end}}
+{{- range .IntegerFields}}
+	if params.{{.GoName}} != 0 {
+		db = db.Where("{{.Column}} = ?", params.{{.GoName}})
+	} else if len(params.{{.GoName}}List) > 0 {
+		db = db.Where("{{.Column}} IN ?", params.{{.GoName}}List)
+	}
+{{- end}}
 {{- range .TimeFields}}
 	if !params.{{.GoName}}Start.IsZero() {
 		db = db.Where("{{.Column}} >= ?", params.{{.GoName}}Start)
@@ -201,6 +216,13 @@ func (m *{{.EntityName}}Model) DeleteByParamWithTx(tx *gorm.DB, params *{{.Entit
 		db = db.Where("{{.PrimaryKey.Column}} = ?", *params.{{.PrimaryKey.GoName}})
 	} else if len(params.{{.PrimaryKey.GoName}}List) > 0 {
 		db = db.Where("{{.PrimaryKey.Column}} IN ?", params.{{.PrimaryKey.GoName}}List)
+	}
+{{- end}}
+{{- range .IntegerFields}}
+	if params.{{.GoName}} != nil {
+		db = db.Where("{{.Column}} = ?", *params.{{.GoName}})
+	} else if len(params.{{.GoName}}List) > 0 {
+		db = db.Where("{{.Column}} IN ?", params.{{.GoName}}List)
 	}
 {{- end}}
 	res := db.Delete(&{{.EntityName}}{})
