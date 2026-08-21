@@ -1,0 +1,103 @@
+{
+  "manifest_version": "1",
+  "protocol_version": "1.0",
+  "id": "com.verix.dao",
+  "name": "dao",
+  "display_name": "DAO Generator",
+  "version": "1.0.0",
+  "description": "根据数据库表结构生成符合 Go GORM Model Standards 的 DAO 层代码",
+  "runtime": {
+    "command": "dao-plugin.exe",
+    "args": [],
+    "activation": "lazy",
+    "startup_timeout_ms": 5000,
+    "call_timeout_ms": 30000,
+    "shutdown_timeout_ms": 3000,
+    "max_concurrent_calls": 2,
+    "restart_policy": "on_failure",
+    "max_restarts": 3
+  },
+  "permissions": [],
+  "methods": [
+    {
+      "name": "generate",
+      "description": "连接 MySQL 数据库，读取指定表的字段结构，生成符合 Go GORM Model Standards 的 model 代码",
+      "input_schema": {
+        "type": "object",
+        "properties": {
+          "dsn": {
+            "type": "string",
+            "description": "MySQL 连接串，含用户名和密码，例如 root:pass@tcp(127.0.0.1:3306)/mydb?parseTime=true"
+          },
+          "tables": {
+            "type": "array",
+            "items": { "type": "string" },
+            "description": "要生成 model 的表名列表"
+          },
+          "package_name": {
+            "type": "string",
+            "description": "生成的包名，默认 model"
+          }
+        },
+        "required": ["dsn", "tables"],
+        "additionalProperties": false
+      },
+      "output_schema": {
+        "type": "object",
+        "properties": {
+          "files": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "table": { "type": "string" },
+                "entity": { "type": "string" },
+                "package": { "type": "string" },
+                "code": { "type": "string" }
+              },
+              "required": ["table", "entity", "package", "code"],
+              "additionalProperties": false
+            }
+          }
+        },
+        "required": ["files"],
+        "additionalProperties": false
+      },
+      "flags": {
+        "read_only": true,
+        "idempotent": true,
+        "supports_cancellation": true
+      }
+    },
+    {
+      "name": "list_tables",
+      "description": "连接 MySQL 数据库并列出当前数据库的所有表",
+      "input_schema": {
+        "type": "object",
+        "properties": {
+          "dsn": {
+            "type": "string",
+            "description": "MySQL 连接串，含用户名和密码"
+          }
+        },
+        "required": ["dsn"],
+        "additionalProperties": false
+      },
+      "output_schema": {
+        "type": "object",
+        "properties": {
+          "tables": {
+            "type": "array",
+            "items": { "type": "string" }
+          }
+        },
+        "required": ["tables"],
+        "additionalProperties": false
+      },
+      "flags": {
+        "read_only": true,
+        "idempotent": true
+      }
+    }
+  ]
+}
