@@ -7,6 +7,8 @@ import (
 	"time"
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
+
+	"verix/sdk/protocol"
 )
 
 type PluginListInput struct{}
@@ -24,12 +26,12 @@ type PluginListOutput struct {
 	Plugins []PluginSummary `json:"plugins"`
 }
 type PluginDescribeOutput struct {
-	Plugin any `json:"plugin"`
+	Plugin *protocol.DescribeResult `json:"plugin"`
 }
 type PluginCallOutput struct {
 	Plugin string         `json:"plugin"`
 	Method string         `json:"method"`
-	Result any            `json:"result,omitempty"`
+	Result map[string]any `json:"result,omitempty"`
 	Meta   map[string]any `json:"meta,omitempty"`
 }
 
@@ -67,7 +69,7 @@ func (m *Manager) callHandler(ctx context.Context, _ *mcp.CallToolRequest, in Pl
 	if err != nil {
 		return nil, PluginCallOutput{}, err
 	}
-	var resultAny any
+	var resultAny map[string]any
 	if len(result) > 0 {
 		_ = json.Unmarshal(result, &resultAny)
 	}
