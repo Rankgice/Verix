@@ -13,7 +13,7 @@
 | Validate required fields/defaults | `runner.go:28-94` | Enforces protocol requirements; defaults timeout to 5000ms |
 | Case orchestration | `runner.go:96-217` | Per-case execution loop + report aggregation |
 | HTTP execution rules | `runner.go:220-297` | Base URL join, query/header merge, JSON body default |
-| gRPC execution rules | `runner.go:299-366` | Calls `grpcurl`, maps stderr to grpc code |
+| gRPC execution rules | `runner.go:299-366` | Calls `grpcurl`, captures initial metadata for `expect.headers`, maps stderr to grpc code |
 | Expect DSL evaluation | `runner.go:368-572` | status/grpc/header/body rule assertions + diffs |
 | Extract + placeholders | `runner.go:574-638` | `extract`, `{{vars.*}}`, `{{timestamp}}` behavior |
 | Diff classification/diagnosis | `runner.go:813-866` | Runtime error type mapping + diagnosis hints |
@@ -21,6 +21,7 @@
 ## CONVENTIONS (ENGINE-SPECIFIC)
 - Keep protocol behavior symmetric where possible (HTTP/gRPC feed unified report model).
 - `ValidateSpec` and `RunSpec` must stay aligned with `types.go` and `设计方案.md` DSL.
+- `expect.headers` means HTTP response headers and gRPC initial metadata.
 - Body-path evaluation depends on `normalizePath` + `gjson` semantics.
 - Diff type vocabulary is stable API surface for downstream consumers.
 - Runtime diagnosis strings should stay concise and deduplicated (`uniqueStrings`).

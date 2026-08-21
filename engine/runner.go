@@ -22,8 +22,10 @@ import (
 var (
 	placeholderRe  = regexp.MustCompile(`\{\{\s*([^}]+?)\s*\}\}`)
 	bracketIndexRe = regexp.MustCompile(`\[(\d+)\]`)
-	grpcCodeRe     = regexp.MustCompile(`code = ([A-Za-z]+)`)
+	grpcCodeRe     = regexp.MustCompile(`(?m)(?:code =|Code:\s*)([A-Za-z]+)`)
 )
+
+var execCommandContext = exec.CommandContext
 
 func ValidateSpec(spec *TestSpec) []string {
 	if spec == nil {
@@ -155,12 +157,13 @@ func RunSpec(ctx context.Context, spec *TestSpec) (*RunReport, error) {
 				runErr = fmt.Errorf("invalid grpc request: %w", err)
 				break
 			}
-			code, body, endpoint, err := executeGRPC(timeoutCtx, spec, req, vars)
+			code, headers, body, endpoint, err := executeGRPC(timeoutCtx, spec, req, vars)
 			execResult.Endpoint = endpoint
 			if err != nil {
 				runErr = err
 			}
 			respCode = &code
+			respHeaders = headers
 			respBody = body
 		default:
 			runErr = fmt.Errorf("unsupported protocol %q", protocol)
@@ -169,6 +172,7 @@ func RunSpec(ctx context.Context, spec *TestSpec) (*RunReport, error) {
 
 		execResult.Status = respStatus
 		execResult.GRPCCode = respCode
+		execResult.ResponseHeaders = respHeaders
 		execResult.ResponseBody = respBody
 		if runErr != nil {
 			execResult.Error = runErr.Error()
@@ -191,6 +195,7 @@ func RunSpec(ctx context.Context, spec *TestSpec) (*RunReport, error) {
 			Endpoint: execResult.Endpoint,
 			Expected: expectedToMap(tc.Expect),
 			Actual: map[string]any{
+				"headers":   respHeaders,
 				"status":    respStatus,
 				"grpc_code": respCode,
 				"body":      respBody,
@@ -296,7 +301,7 @@ func executeHTTP(ctx context.Context, spec *TestSpec, in HTTPRequest, vars map[s
 	return resp.StatusCode, respHeaders, parseMaybeJSON(respBytes), method + " " + pathRaw, nil
 }
 
-func executeGRPC(ctx context.Context, spec *TestSpec, in GRPCRequest, vars map[string]any) (string, any, string, error) {
+func executeGRPC(ctx context.Context, spec *TestSpec, in GRPCRequest, vars map[string]any) (string, map[string]string, any, string, error) {
 	target := ""
 	plaintext := true
 	defaultMetadata := map[string]string{}
@@ -308,7 +313,7 @@ func executeGRPC(ctx context.Context, spec *TestSpec, in GRPCRequest, vars map[s
 		}
 	}
 	if strings.TrimSpace(target) == "" {
-		return "UNKNOWN", nil, "", errors.New("grpc target is empty")
+		return "UNKNOWN", nil, nil, "", errors.New("grpc target is empty")
 	}
 
 	endpoint := strings.TrimSpace(in.Service) + "/" + strings.TrimSpace(in.Method)
@@ -337,32 +342,36 @@ func executeGRPC(ctx context.Context, spec *TestSpec, in GRPCRequest, vars map[s
 	}
 	msgBytes, err := json.Marshal(msg)
 	if err != nil {
-		return "UNKNOWN", nil, endpoint, fmt.Errorf("marshal grpc message: %w", err)
+		return "UNKNOWN", nil, nil, endpoint, fmt.Errorf("marshal grpc message: %w", err)
 	}
 
-	args = append(args, "-d", string(msgBytes), target, endpoint)
-	cmd := exec.CommandContext(ctx, "grpcurl", args...)
-	stdout, err := cmd.Output()
+	args = append(args, "-v", "-d", string(msgBytes), target, endpoint)
+	cmd := execCommandContext(ctx, "grpcurl", args...)
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+	cmd.Stdout = &stdout
+	cmd.Stderr = &stderr
+	err = cmd.Run()
+	parsedHeaders, parsedBody := parseGRPCVerboseOutput(stdout.Bytes())
 	if err == nil {
-		return "OK", parseMaybeJSON(stdout), endpoint, nil
+		return "OK", parsedHeaders, parsedBody, endpoint, nil
 	}
 
-	var stderr string
-	var exitErr *exec.ExitError
-	if errors.As(err, &exitErr) {
-		stderr = string(exitErr.Stderr)
-	}
-	if strings.TrimSpace(stderr) == "" {
-		stderr = err.Error()
+	stderrText := strings.TrimSpace(stderr.String())
+	if stderrText == "" {
+		stderrText = err.Error()
 	}
 
 	code := "UNKNOWN"
-	match := grpcCodeRe.FindStringSubmatch(stderr)
+	match := grpcCodeRe.FindStringSubmatch(stderrText)
 	if len(match) > 1 {
 		code = match[1]
 	}
+	if bodyIsEmpty(parsedBody) {
+		parsedBody = map[string]any{"error": stderrText}
+	}
 
-	return code, map[string]any{"error": strings.TrimSpace(stderr)}, endpoint, fmt.Errorf("grpc call failed: %s", strings.TrimSpace(stderr))
+	return code, parsedHeaders, parsedBody, endpoint, fmt.Errorf("grpc call failed: %s", stderrText)
 }
 
 func evaluateExpect(expect Expect, protocol string, status *int, grpcCode *string, headers map[string]string, body any) ([]AssertionResult, []Diff) {
@@ -647,6 +656,116 @@ func parseMaybeJSON(b []byte) any {
 		return out
 	}
 	return string(trimmed)
+}
+
+func parseGRPCVerboseOutput(stdout []byte) (map[string]string, any) {
+	sections := parseGRPCVerboseSections(string(stdout))
+	if len(sections) == 0 {
+		return map[string]string{}, parseMaybeJSON(stdout)
+	}
+
+	headers := parseGRPCMetadataBlock(firstSection(sections["Response headers received"]))
+	contentBlocks := sections["Response contents"]
+	if len(contentBlocks) == 0 {
+		return headers, map[string]any{}
+	}
+	if len(contentBlocks) == 1 {
+		return headers, parseMaybeJSON([]byte(contentBlocks[0]))
+	}
+
+	body := make([]any, 0, len(contentBlocks))
+	for _, block := range contentBlocks {
+		body = append(body, parseMaybeJSON([]byte(block)))
+	}
+	return headers, body
+}
+
+func parseGRPCVerboseSections(output string) map[string][]string {
+	lines := strings.Split(strings.ReplaceAll(output, "\r\n", "\n"), "\n")
+	sections := make(map[string][]string)
+	currentHeading := ""
+	var currentLines []string
+	flush := func() {
+		if currentHeading == "" {
+			return
+		}
+		sections[currentHeading] = append(sections[currentHeading], strings.Trim(strings.Join(currentLines, "\n"), "\n"))
+		currentHeading = ""
+		currentLines = nil
+	}
+
+	for _, line := range lines {
+		trimmed := strings.TrimSpace(line)
+		switch trimmed {
+		case "Request metadata to send:", "Response headers received:", "Response contents:", "Response trailers received:":
+			flush()
+			currentHeading = strings.TrimSuffix(trimmed, ":")
+			currentLines = nil
+		case "":
+			if currentHeading != "" {
+				currentLines = append(currentLines, line)
+			}
+		default:
+			if strings.HasPrefix(trimmed, "Sent ") {
+				flush()
+				continue
+			}
+			if currentHeading != "" {
+				currentLines = append(currentLines, line)
+			}
+		}
+	}
+	flush()
+	return sections
+}
+
+func parseGRPCMetadataBlock(block string) map[string]string {
+	out := make(map[string]string)
+	trimmed := strings.TrimSpace(block)
+	if trimmed == "" || trimmed == "(empty)" {
+		return out
+	}
+
+	for _, line := range strings.Split(trimmed, "\n") {
+		entry := strings.TrimSpace(line)
+		if entry == "" {
+			continue
+		}
+		key, value, ok := strings.Cut(entry, ":")
+		if !ok {
+			continue
+		}
+		key = strings.TrimSpace(key)
+		value = strings.TrimSpace(value)
+		if existing, exists := out[key]; exists {
+			out[key] = existing + "," + value
+			continue
+		}
+		out[key] = value
+	}
+	return out
+}
+
+func firstSection(sections []string) string {
+	if len(sections) == 0 {
+		return ""
+	}
+	return sections[0]
+}
+
+func bodyIsEmpty(body any) bool {
+	switch t := body.(type) {
+	case nil:
+		return true
+	case string:
+		return strings.TrimSpace(t) == ""
+	case []any:
+		return len(t) == 0
+	case map[string]any:
+		return len(t) == 0
+	default:
+		return false
+	}
 }
 
 func flattenHeaders(h http.Header) map[string]string {

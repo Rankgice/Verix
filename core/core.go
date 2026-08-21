@@ -15,6 +15,7 @@ func NewServer() *mcp.Server {
 
 	tools.RegisterValidateSpec(server)
 	tools.RegisterRunSpec(server)
+	tools.RegisterInitializeTestSpec(server)
 	tools.RegisterInitializeDB(server)
 	tools.RegisterExecuteSQL(server)
 	tools.RegisterListTables(server)

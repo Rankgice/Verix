@@ -28,6 +28,9 @@ func runSpecHandler(ctx context.Context, req *mcp.CallToolRequest, in SpecInput)
 	if err != nil {
 		return nil, RunSpecOutput{}, err
 	}
+	if err := applyGlobalVarsToSpec(spec, ""); err != nil {
+		return nil, RunSpecOutput{}, err
+	}
 
 	report, err := engine.RunSpec(ctx, spec)
 	if err != nil {

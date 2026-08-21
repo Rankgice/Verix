@@ -89,15 +89,16 @@ type Summary struct {
 }
 
 type CaseExecution struct {
-	ID           string            `json:"id"`
-	Protocol     string            `json:"protocol"`
-	Endpoint     string            `json:"endpoint"`
-	DurationMS   int64             `json:"duration_ms"`
-	Status       *int              `json:"status,omitempty"`
-	GRPCCode     *string           `json:"grpc_code,omitempty"`
-	ResponseBody any               `json:"response_body,omitempty"`
-	Error        string            `json:"error,omitempty"`
-	Assertions   []AssertionResult `json:"assertions"`
+	ID              string            `json:"id"`
+	Protocol        string            `json:"protocol"`
+	Endpoint        string            `json:"endpoint"`
+	DurationMS      int64             `json:"duration_ms"`
+	Status          *int              `json:"status,omitempty"`
+	GRPCCode        *string           `json:"grpc_code,omitempty"`
+	ResponseHeaders map[string]string `json:"response_headers,omitempty"`
+	ResponseBody    any               `json:"response_body,omitempty"`
+	Error           string            `json:"error,omitempty"`
+	Assertions      []AssertionResult `json:"assertions"`
 }
 
 type AssertionResult struct {

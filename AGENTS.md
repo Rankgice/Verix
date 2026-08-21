@@ -31,11 +31,11 @@ verix/
 | Task | Location | Notes |
 |---|---|---|
 | Server startup path | `main.go`, `core/core.go` | `main -> core.NewServer -> Run(stdio)` |
-| Register MCP tools | `tools/run_spec.go`, `tools/validate_spec.go` | Tool names are `run_testspec` and `validate_testspec` |
+| Register MCP tools | `tools/run_spec.go`, `tools/validate_spec.go`, `tools/initialize_testspec.go` | Tool names include `run_testspec`, `validate_testspec`, `initialize_testspec` |
 | Parse/ingest input spec | `tools/common.go` | `spec_path` or `spec_json` required |
 | Spec schema contract | `engine/types.go` | Source of truth for TestSpec fields |
 | Runtime + assertions + diffs | `engine/runner.go` | HTTP/gRPC execution, expect DSL, diagnosis |
-| Built-in example payload | `resources/examples.go` | URI: `verix://examples/testspec/basic-http` |
+| Built-in example payloads | `resources/examples.go` | URIs: `verix://examples/testspec/basic-http`, `verix://examples/testspec/basic-grpc` |
 
 ## CONVENTIONS (PROJECT-SPECIFIC)
 - Go toolchain target: `go 1.25.6` (`go.mod`).
@@ -46,6 +46,7 @@ verix/
 - `spec_path` takes precedence when both `spec_path` and `spec_json` are set.
 - Relative HTTP request paths require `meta.protocol_defaults.http.base_url`.
 - gRPC execution shells out to `grpcurl`; environment must provide it in `PATH`.
+- gRPC `expect.headers` assertions target response initial metadata.
 - Placeholder style: `{{vars.key}}` and `{{timestamp}}`.
 
 ## ANTI-PATTERNS (THIS PROJECT)
