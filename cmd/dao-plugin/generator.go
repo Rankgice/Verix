@@ -23,15 +23,16 @@ type columnInfo struct {
 
 // FieldModel 是传给模板的单个字段描述。
 type FieldModel struct {
-	Column    string // 数据库列名，如 group_id
-	GoName    string // Go 字段名，如 GroupId
-	GoType    string // Go 类型，如 int64
-	JSONName  string // JSON 名，如 group_id
-	GormTag   string // 完整 GORM tag 内容，如 column:group_id;not null
-	Comment   string // 字段注释
-	OmitEmpty bool   // 是否在 json tag 加 omitempty
-	VarName   string // 用作变量的名字，如 id
-	ZeroValue string // 等值比较用的零值，如 "0" 或 `""`
+	Column       string // 数据库列名，如 group_id
+	GoName       string // Go 字段名，如 GroupId
+	GoType       string // Go 类型，如 int64
+	JSONName     string // JSON 名，如 group_id
+	GormTag      string // 完整 GORM tag 内容，如 column:group_id;not null
+	Comment      string // 字段注释
+	OmitEmpty    bool   // 是否在 json tag 加 omitempty
+	VarName      string // 用作变量的名字，如 id
+	ZeroValue    string // 等值比较用的零值，如 "0" 或 `""`
+	SupportsList bool   // 是否生成 XxxList，用于以 _id 结尾的整形外键字段和主键
 }
 
 // TimeRangeField 描述时间字段的查询范围参数。
@@ -44,21 +45,22 @@ type TimeRangeField struct {
 
 // TableModel 是传给模板的单个表的数据模型。
 type TableModel struct {
-	PackageName       string
-	ImportBlock       string
-	EntityName        string // 如 User
-	TableName         string // 如 user
-	LowerEntityName   string // 如 user（用于排序白名单变量名）
-	Comment           string // 表注释，用于注释和日志
-	VarName           string // 单数变量名，如 user
-	VarNameList       string // 复数变量名，如 users
-	PrimaryKey        *FieldModel
-	Fields            []FieldModel     // entity 的全部字段（含主键）
-	SortFields        []FieldModel     // 可排序字段（主键 + 可排序普通字段）
-	QueryStringFields []FieldModel     // 用于 LIKE 过滤的字符串字段
-	IntegerFields     []FieldModel     // 用于等值和 IN 过滤的整形字段（不含主键）
-	TimeFields        []TimeRangeField // 用于范围过滤的时间字段
-	UpdatableFields   []FieldModel     // 更新参数里的非主键字段
+	PackageName        string
+	ImportBlock        string
+	EntityName         string // 如 User
+	TableName          string // 如 user
+	LowerEntityName    string // 如 user（用于排序白名单变量名）
+	Comment            string // 表注释，用于注释和日志
+	VarName            string // 单数变量名，如 user
+	VarNameList        string // 复数变量名，如 users
+	PrimaryKey         *FieldModel
+	Fields             []FieldModel     // entity 的全部字段（含主键）
+	SortFields         []FieldModel     // 可排序字段（主键 + 可排序普通字段）
+	QueryStringFields  []FieldModel     // 用于 LIKE 过滤的字符串字段
+	QueryFilterFields  []FieldModel     // QueryParams 中的主键和整形过滤字段
+	DeleteFilterFields []FieldModel     // DeleteParams 中的主键和整形过滤字段
+	TimeFields         []TimeRangeField // 用于范围过滤的时间字段
+	UpdatableFields    []FieldModel     // 更新参数里的非主键字段
 }
 
 // connect 使用 DSN 打开 MySQL 连接并做连通性校验。
@@ -190,6 +192,12 @@ func isIntegerType(dataType, columnType string) bool {
 	return false
 }
 
+// isListField 判断整形字段是否应该生成 XxxList。
+// 主键始终支持列表；普通整形字段只有数据库列名以 _id 结尾时才支持列表。
+func isListField(column string, isPrimary bool) bool {
+	return isPrimary || strings.HasSuffix(strings.ToLower(column), "_id")
+}
+
 // isLikeQueryable 判断字符串字段是否适合 LIKE 过滤。
 func isLikeQueryable(dataType string) bool {
 	switch strings.ToLower(dataType) {
@@ -284,17 +292,21 @@ func buildTableModel(packageName, table string, columns []columnInfo) *TableMode
 			OmitEmpty: c.Nullable,
 			VarName:   lowerFirst(toGoName(c.Name)),
 		}
+
+		isPrimary := strings.EqualFold(c.ColumnKey, "PRI")
+		f.SupportsList = isListField(c.Name, isPrimary)
 		if f.GoType == "string" {
 			f.ZeroValue = `""`
 		} else {
 			f.ZeroValue = "0"
 		}
 
-		isPrimary := strings.EqualFold(c.ColumnKey, "PRI")
 		if isPrimary {
 			f.OmitEmpty = false
 			pk := f
 			m.PrimaryKey = &pk
+			m.QueryFilterFields = append(m.QueryFilterFields, f)
+			m.DeleteFilterFields = append(m.DeleteFilterFields, f)
 		}
 
 		m.Fields = append(m.Fields, f)
@@ -310,7 +322,8 @@ func buildTableModel(packageName, table string, columns []columnInfo) *TableMode
 			m.QueryStringFields = append(m.QueryStringFields, f)
 		}
 		if !isPrimary && isIntegerType(c.DataType, c.ColumnType) {
-			m.IntegerFields = append(m.IntegerFields, f)
+			m.QueryFilterFields = append(m.QueryFilterFields, f)
+			m.DeleteFilterFields = append(m.DeleteFilterFields, f)
 		}
 		if isTimeType(c.DataType) {
 			m.TimeFields = append(m.TimeFields, TimeRangeField{

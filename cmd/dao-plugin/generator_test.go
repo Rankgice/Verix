@@ -10,6 +10,7 @@ func buildUserGroupColumns() []columnInfo {
 	return []columnInfo{
 		{Name: "id", DataType: "bigint", ColumnType: "bigint", ColumnKey: "PRI", Extra: "auto_increment", Comment: "数据库主键ID"},
 		{Name: "group_id", DataType: "bigint", ColumnType: "bigint", ColumnKey: "", Comment: "分组ID"},
+		{Name: "age", DataType: "int", ColumnType: "int", ColumnKey: "", Comment: "年龄"},
 		{Name: "name", DataType: "varchar", ColumnType: "varchar(255)", ColumnKey: "", Comment: "名称"},
 		{Name: "description", DataType: "varchar", ColumnType: "varchar(255)", Nullable: true, ColumnKey: "", Comment: "描述"},
 		{Name: "created_at", DataType: "datetime", ColumnType: "datetime", ColumnKey: "", Default: "CURRENT_TIMESTAMP", Comment: "创建时间"},
@@ -104,12 +105,14 @@ func TestRenderUserGroupModel(t *testing.T) {
 		// 整形普通字段进入 QueryParams：单值 + List，并生成等值/IN 过滤。
 		"GroupId     int64",
 		"GroupIdList []int64",
+		"Age         int",
 		"if params.GroupId != 0",
 		`db.Where("group_id = ?", params.GroupId)`,
 		"len(params.GroupIdList) > 0",
 		`db.Where("group_id IN ?", params.GroupIdList)`,
 		// 整形普通字段进入 DeleteParams：指针单值 + List，并生成等值/IN 删除条件。
 		"GroupId     *int64",
+		"Age         *int",
 		"if params.GroupId != nil",
 		`db.Where("group_id = ?", *params.GroupId)`,
 	}
@@ -117,6 +120,18 @@ func TestRenderUserGroupModel(t *testing.T) {
 		if !strings.Contains(code, want) {
 			t.Errorf("生成代码缺少 %q", want)
 		}
+	}
+	if strings.Contains(code, "IdList") && strings.Count(code, "IdList") < 2 {
+		t.Errorf("主键 IdList 应在查询和删除参数中生成")
+	}
+	if strings.Count(code, `json:"group_id_list"`) != 2 {
+		t.Errorf("GroupIdList 字段声明应只在 QueryParams 和 DeleteParams 各生成一次，实际次数=%d", strings.Count(code, `json:"group_id_list"`))
+	}
+	if strings.Contains(code, "AgeList") {
+		t.Errorf("普通整形字段 age 不应生成 AgeList")
+	}
+	if !strings.Contains(code, "GroupIdList") {
+		t.Errorf("_id 结尾的整形字段 group_id 应生成 GroupIdList")
 	}
 	// 不应出现全大写 ID 命名。
 	if strings.Contains(code, "GroupID") || strings.Contains(code, "ID int64") {
