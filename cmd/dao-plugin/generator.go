@@ -2,12 +2,21 @@ package main
 
 import (
 	"context"
+	"crypto/sha256"
 	"database/sql"
+	"encoding/hex"
+	"errors"
 	"fmt"
+	"io"
+	"os"
+	"path/filepath"
 	"strings"
+	"sync"
 
 	_ "github.com/go-sql-driver/mysql"
 )
+
+var outputDirLocks sync.Map
 
 // columnInfo 是从 information_schema 读到的原始列信息。
 type columnInfo struct {
@@ -37,30 +46,30 @@ type FieldModel struct {
 
 // TimeRangeField 描述时间字段的查询范围参数。
 type TimeRangeField struct {
-	GoName    string // 如 CreatedAt
-	Column    string // 如 created_at
-	JSONStart string // 如 created_at_start
-	JSONEnd   string // 如 created_at_end
+	GoName    string
+	Column    string
+	JSONStart string
+	JSONEnd   string
 }
 
 // TableModel 是传给模板的单个表的数据模型。
 type TableModel struct {
 	PackageName        string
 	ImportBlock        string
-	EntityName         string // 如 User
-	TableName          string // 如 user
-	LowerEntityName    string // 如 user（用于排序白名单变量名）
-	Comment            string // 表注释，用于注释和日志
-	VarName            string // 单数变量名，如 user
-	VarNameList        string // 复数变量名，如 users
+	EntityName         string
+	TableName          string
+	LowerEntityName    string
+	Comment            string
+	VarName            string
+	VarNameList        string
 	PrimaryKey         *FieldModel
-	Fields             []FieldModel     // entity 的全部字段（含主键）
-	SortFields         []FieldModel     // 可排序字段（主键 + 可排序普通字段）
-	QueryStringFields  []FieldModel     // 用于 LIKE 过滤的字符串字段
-	QueryFilterFields  []FieldModel     // QueryParams 中的主键和整形过滤字段
-	DeleteFilterFields []FieldModel     // DeleteParams 中的主键和整形过滤字段
-	TimeFields         []TimeRangeField // 用于范围过滤的时间字段
-	UpdatableFields    []FieldModel     // 更新参数里的非主键字段
+	Fields             []FieldModel
+	SortFields         []FieldModel
+	QueryStringFields  []FieldModel
+	QueryFilterFields  []FieldModel
+	DeleteFilterFields []FieldModel
+	TimeFields         []TimeRangeField
+	UpdatableFields    []FieldModel
 }
 
 // connect 使用 DSN 打开 MySQL 连接并做连通性校验。
@@ -83,7 +92,6 @@ func listTables(ctx context.Context, db *sql.DB) ([]string, error) {
 		return nil, err
 	}
 	defer rows.Close()
-
 	var tables []string
 	for rows.Next() {
 		var name string
@@ -106,7 +114,6 @@ ORDER BY ORDINAL_POSITION`, table)
 		return nil, err
 	}
 	defer rows.Close()
-
 	var columns []columnInfo
 	for rows.Next() {
 		var c columnInfo
@@ -132,8 +139,7 @@ ORDER BY ORDINAL_POSITION`, table)
 
 // goTypeFor 将 MySQL 类型映射为 Go 类型。
 func goTypeFor(dataType, columnType string) string {
-	dt := strings.ToLower(dataType)
-	switch dt {
+	switch dt := strings.ToLower(dataType); dt {
 	case "bigint":
 		return "int64"
 	case "int", "integer", "mediumint":
@@ -149,9 +155,7 @@ func goTypeFor(dataType, columnType string) string {
 		return "float32"
 	case "double", "decimal", "numeric":
 		return "float64"
-	case "varchar", "char", "enum", "set", "json":
-		return "string"
-	case "text", "tinytext", "mediumtext", "longtext":
+	case "varchar", "char", "enum", "set", "json", "text", "tinytext", "mediumtext", "longtext":
 		return "string"
 	case "datetime", "timestamp", "date", "time":
 		return "time.Time"
@@ -162,7 +166,7 @@ func goTypeFor(dataType, columnType string) string {
 	}
 }
 
-// isTimeType 判断是否映射为 time.Time。
+// isTimeType 判断字段是否映射为 time.Time。
 func isTimeType(dataType string) bool {
 	switch strings.ToLower(dataType) {
 	case "datetime", "timestamp", "date", "time":
@@ -181,7 +185,6 @@ func isSortable(dataType string) bool {
 }
 
 // isIntegerType 判断字段是否为整形类型。
-// tinyint(1) 会映射为 bool，因此不作为整形过滤字段。
 func isIntegerType(dataType, columnType string) bool {
 	switch strings.ToLower(dataType) {
 	case "bigint", "int", "integer", "mediumint", "smallint":
@@ -193,7 +196,6 @@ func isIntegerType(dataType, columnType string) bool {
 }
 
 // isListField 判断整形字段是否应该生成 XxxList。
-// 主键始终支持列表；普通整形字段只有数据库列名以 _id 结尾时才支持列表。
 func isListField(column string, isPrimary bool) bool {
 	return isPrimary || strings.HasSuffix(strings.ToLower(column), "_id")
 }
@@ -207,11 +209,10 @@ func isLikeQueryable(dataType string) bool {
 	return false
 }
 
-// toGoName 将 snake_case 列名转换为 Go 字段名，如 group_id -> GroupId。
+// toGoName 将 snake_case 列名转换为 Go 字段名。
 func toGoName(column string) string {
-	parts := strings.Split(column, "_")
 	var b strings.Builder
-	for _, p := range parts {
+	for _, p := range strings.Split(column, "_") {
 		if p == "" {
 			continue
 		}
@@ -232,8 +233,7 @@ func lowerFirst(s string) string {
 // buildGormTag 根据列信息构造 GORM tag。
 func buildGormTag(c columnInfo) string {
 	parts := []string{"column:" + c.Name}
-	isPrimary := strings.EqualFold(c.ColumnKey, "PRI")
-	if isPrimary {
+	if strings.EqualFold(c.ColumnKey, "PRI") {
 		parts = append(parts, "primaryKey")
 	}
 	if strings.Contains(strings.ToLower(c.Extra), "auto_increment") {
@@ -251,7 +251,7 @@ func buildGormTag(c columnInfo) string {
 	return strings.Join(parts, ";")
 }
 
-// gormDefault 判断默认值是否可安全放入 GORM tag，返回可用的默认值。
+// gormDefault 判断默认值是否可安全放入 GORM tag。
 func gormDefault(def string) (string, bool) {
 	if def == "" {
 		return "", false
@@ -270,29 +270,12 @@ func gormDefault(def string) (string, bool) {
 
 // buildTableModel 将一张表的原始列信息组装成模板数据。
 func buildTableModel(packageName, table string, columns []columnInfo) *TableModel {
-	m := &TableModel{
-		PackageName:     packageName,
-		TableName:       table,
-		EntityName:      toGoName(table),
-		LowerEntityName: lowerFirst(toGoName(table)),
-		Comment:         table,
-	}
+	m := &TableModel{PackageName: packageName, TableName: table, EntityName: toGoName(table), LowerEntityName: lowerFirst(toGoName(table)), Comment: table}
 	m.VarName = lowerFirst(m.EntityName)
 	m.VarNameList = m.VarName + "s"
-
 	var hasTime, hasSort bool
 	for _, c := range columns {
-		f := FieldModel{
-			Column:    c.Name,
-			GoName:    toGoName(c.Name),
-			GoType:    goTypeFor(c.DataType, c.ColumnType),
-			JSONName:  c.Name,
-			GormTag:   buildGormTag(c),
-			Comment:   c.Comment,
-			OmitEmpty: c.Nullable,
-			VarName:   lowerFirst(toGoName(c.Name)),
-		}
-
+		f := FieldModel{Column: c.Name, GoName: toGoName(c.Name), GoType: goTypeFor(c.DataType, c.ColumnType), JSONName: c.Name, GormTag: buildGormTag(c), Comment: c.Comment, OmitEmpty: c.Nullable, VarName: lowerFirst(toGoName(c.Name))}
 		isPrimary := strings.EqualFold(c.ColumnKey, "PRI")
 		f.SupportsList = isListField(c.Name, isPrimary)
 		if f.GoType == "string" {
@@ -300,7 +283,6 @@ func buildTableModel(packageName, table string, columns []columnInfo) *TableMode
 		} else {
 			f.ZeroValue = "0"
 		}
-
 		if isPrimary {
 			f.OmitEmpty = false
 			pk := f
@@ -308,9 +290,7 @@ func buildTableModel(packageName, table string, columns []columnInfo) *TableMode
 			m.QueryFilterFields = append(m.QueryFilterFields, f)
 			m.DeleteFilterFields = append(m.DeleteFilterFields, f)
 		}
-
 		m.Fields = append(m.Fields, f)
-
 		if f.GoType == "time.Time" {
 			hasTime = true
 		}
@@ -326,18 +306,12 @@ func buildTableModel(packageName, table string, columns []columnInfo) *TableMode
 			m.DeleteFilterFields = append(m.DeleteFilterFields, f)
 		}
 		if isTimeType(c.DataType) {
-			m.TimeFields = append(m.TimeFields, TimeRangeField{
-				GoName:    f.GoName,
-				Column:    f.Column,
-				JSONStart: f.Column + "_start",
-				JSONEnd:   f.Column + "_end",
-			})
+			m.TimeFields = append(m.TimeFields, TimeRangeField{GoName: f.GoName, Column: f.Column, JSONStart: f.Column + "_start", JSONEnd: f.Column + "_end"})
 		}
 		if !isPrimary {
 			m.UpdatableFields = append(m.UpdatableFields, f)
 		}
 	}
-
 	m.ImportBlock = buildImportBlock(hasTime, hasSort)
 	return m
 }
@@ -352,7 +326,6 @@ func buildImportBlock(hasTime, hasSort bool) string {
 	if hasSort {
 		third = append(third, `"gorm.io/gorm/clause"`)
 	}
-
 	var b strings.Builder
 	b.WriteString("import (\n")
 	for _, s := range std {
@@ -366,4 +339,77 @@ func buildImportBlock(hasTime, hasSort bool) string {
 	}
 	b.WriteString(")")
 	return b.String()
+}
+
+// resolveOutputDir 校验并规范化 file mode 的输出目录。
+func resolveOutputDir(raw string) (string, error) {
+	if strings.TrimSpace(raw) == "" {
+		return "", errors.New("output_dir is required in file mode")
+	}
+	if strings.ContainsRune(raw, 0) {
+		return "", errors.New("output_dir contains NUL")
+	}
+	clean := filepath.Clean(raw)
+	if clean == "." || clean == ".." {
+		return "", errors.New("output_dir must identify a real directory")
+	}
+	abs, err := filepath.Abs(clean)
+	if err != nil {
+		return "", fmt.Errorf("resolve output_dir: %w", err)
+	}
+	if info, err := os.Stat(abs); err == nil && !info.IsDir() {
+		return "", fmt.Errorf("output_dir is not a directory: %s", abs)
+	}
+	return abs, nil
+}
+
+// resolveTableFile 将表名安全地映射为输出目录下的 .go 文件。
+func resolveTableFile(outputDir, table string) (string, error) {
+	if table == "" || strings.ContainsRune(table, 0) || strings.ContainsAny(table, `/\\`) || table == "." || table == ".." {
+		return "", fmt.Errorf("unsafe table name: %q", table)
+	}
+	return filepath.Join(outputDir, table+".go"), nil
+}
+
+// writeGeneratedFile 原子写入一个生成文件，允许覆盖已有文件并返回文件信息。
+func writeGeneratedFile(outputDir, table, entity, packageName, code string) (GeneratedFileInfo, error) {
+	path, err := resolveTableFile(outputDir, table)
+	if err != nil {
+		return GeneratedFileInfo{}, err
+	}
+	if err := os.MkdirAll(outputDir, 0o755); err != nil {
+		return GeneratedFileInfo{}, fmt.Errorf("create output_dir: %w", err)
+	}
+	key := filepath.Clean(outputDir)
+	lockValue, _ := outputDirLocks.LoadOrStore(key, &sync.Mutex{})
+	lock := lockValue.(*sync.Mutex)
+	lock.Lock()
+	defer lock.Unlock()
+	_, statErr := os.Stat(path)
+	existed := statErr == nil
+	if statErr != nil && !errors.Is(statErr, os.ErrNotExist) {
+		return GeneratedFileInfo{}, fmt.Errorf("stat target: %w", statErr)
+	}
+	tmp, err := os.CreateTemp(outputDir, ".verix-dao-*.tmp")
+	if err != nil {
+		return GeneratedFileInfo{}, fmt.Errorf("create temp file: %w", err)
+	}
+	tmpName := tmp.Name()
+	defer os.Remove(tmpName)
+	if _, err := io.WriteString(tmp, code); err != nil {
+		tmp.Close()
+		return GeneratedFileInfo{}, fmt.Errorf("write temp file: %w", err)
+	}
+	if err := tmp.Sync(); err != nil {
+		tmp.Close()
+		return GeneratedFileInfo{}, fmt.Errorf("sync temp file: %w", err)
+	}
+	if err := tmp.Close(); err != nil {
+		return GeneratedFileInfo{}, fmt.Errorf("close temp file: %w", err)
+	}
+	if err := os.Rename(tmpName, path); err != nil {
+		return GeneratedFileInfo{}, fmt.Errorf("replace target %s: %w", path, err)
+	}
+	digest := sha256.Sum256([]byte(code))
+	return GeneratedFileInfo{Table: table, Entity: entity, Package: packageName, Path: path, Bytes: len(code), SHA256: hex.EncodeToString(digest[:]), Created: !existed, Overwritten: existed}, nil
 }

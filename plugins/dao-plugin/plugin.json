@@ -21,7 +21,7 @@
   "methods": [
     {
       "name": "generate",
-      "description": "连接 MySQL 数据库，读取指定表的字段结构，生成符合 Go GORM Model Standards 的 model 代码",
+      "description": "连接 MySQL，读取指定表结构；mode=code 返回源码，mode=file 按表名写入 output_dir 并仅返回文件信息。file 模式允许多表，生成 <output_dir>/<table>.go，已有文件会覆盖。",
       "input_schema": {
         "type": "object",
         "properties": {
@@ -37,6 +37,15 @@
           "package_name": {
             "type": "string",
             "description": "生成的包名，默认 model"
+          },
+          "mode": {
+            "type": "string",
+            "enum": ["code", "file"],
+            "description": "code 返回源码（默认）；file 将源码写入 output_dir 并不返回 code"
+          },
+          "output_dir": {
+            "type": "string",
+            "description": "file 模式必填；输出目录不存在会自动创建，每张表生成 <output_dir>/<table>.go，已有文件会覆盖"
           }
         },
         "required": ["dsn", "tables"],
@@ -53,9 +62,14 @@
                 "table": { "type": "string" },
                 "entity": { "type": "string" },
                 "package": { "type": "string" },
-                "code": { "type": "string" }
+                "code": { "type": "string" },
+                "path": { "type": "string" },
+                "bytes": { "type": "integer" },
+                "sha256": { "type": "string" },
+                "created": { "type": "boolean" },
+                "overwritten": { "type": "boolean" }
               },
-              "required": ["table", "entity", "package", "code"],
+              "required": ["table", "entity", "package"],
               "additionalProperties": false
             }
           }
@@ -64,7 +78,7 @@
         "additionalProperties": false
       },
       "flags": {
-        "read_only": true,
+        "read_only": false,
         "idempotent": true,
         "supports_cancellation": true
       }

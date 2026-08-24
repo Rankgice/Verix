@@ -206,6 +206,31 @@ plugin.cancel       取消某次调用（SDK 内部按 call_id 关联 context.Ca
 plugin.invoke       业务调用统一入口，SDK 分发给 Methods 里的 Handler
 ```
 
+## DAO 生成插件的输出模式
+
+项目中的 `com.verix.dao` 插件支持两种模式：
+
+```json
+{
+  "mode": "code",
+  "dsn": "...",
+  "tables": ["category"]
+}
+```
+
+`code` 是默认模式，返回完整源码。
+
+```json
+{
+  "mode": "file",
+  "dsn": "...",
+  "tables": ["category", "user_group"],
+  "output_dir": "D:/project/internal/model"
+}
+```
+
+`file` 模式允许多表，必须传一个目录；插件按表名写入 `<output_dir>/<table>.go`，不存在则创建，存在则覆盖，响应只返回文件路径、大小、SHA-256 和创建/覆盖状态，不返回 `code`。
+
 ## 生成插件的完整步骤
 
 1. 确认插件 ID、name、version，以及需要提供哪些业务方法。
