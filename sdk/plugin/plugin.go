@@ -35,6 +35,18 @@ func (c *Call) DecodeInput(target any) error {
 	return json.Unmarshal(c.Arguments, target)
 }
 
+// describeMethods 返回插件注册的完整业务方法元数据。
+func describeMethods(opts Options) []protocol.Method {
+	if opts.Manifest != nil {
+		return opts.Manifest
+	}
+	methods := make([]protocol.Method, 0, len(opts.Methods))
+	for name := range opts.Methods {
+		methods = append(methods, protocol.Method{Name: name})
+	}
+	return methods
+}
+
 // Run 启动插件 SDK，注册固有生命周期方法并进入 RPC 服务循环。
 func Run(ctx context.Context, opts Options) error {
 	if opts.ID == "" || opts.Name == "" || opts.Version == "" {
@@ -50,14 +62,7 @@ func Run(ctx context.Context, opts Options) error {
 		return protocol.InitializeResult{ProtocolVersion: protocol.ProtocolVersion, PluginID: opts.ID, PluginVersion: opts.Version, Capabilities: protocol.PluginFeatures{Cancellation: true, ConcurrentCalls: true}}, nil
 	})
 	peer.Register("plugin.describe", func(context.Context, json.RawMessage) (any, *protocol.Error) {
-		methods := opts.Manifest
-		if methods == nil {
-			methods = make([]protocol.Method, 0, len(opts.Methods))
-			for name := range opts.Methods {
-				methods = append(methods, protocol.Method{Name: name})
-			}
-		}
-		return protocol.DescribeResult{PluginID: opts.ID, Name: opts.Name, Version: opts.Version, Description: opts.Description, Methods: methods}, nil
+		return protocol.DescribeResult{PluginID: opts.ID, Name: opts.Name, Version: opts.Version, Description: opts.Description, Methods: describeMethods(opts)}, nil
 	})
 	peer.Register("plugin.ping", func(context.Context, json.RawMessage) (any, *protocol.Error) {
 		return protocol.PingResult{Status: "ok"}, nil

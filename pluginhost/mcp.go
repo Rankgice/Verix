@@ -38,8 +38,8 @@ type PluginCallOutput struct {
 // RegisterMCPTools 将插件管理能力注册为 MCP Tools。
 func (m *Manager) RegisterMCPTools(server *mcp.Server) {
 	mcp.AddTool(server, &mcp.Tool{Name: "plugin_list", Description: "List installed Verix plugins and their current status."}, m.listHandler)
-	mcp.AddTool(server, &mcp.Tool{Name: "plugin_describe", Description: "Describe the methods and schemas exposed by a plugin."}, m.describeHandler)
-	mcp.AddTool(server, &mcp.Tool{Name: "plugin_call", Description: "Call a method exposed by a Verix plugin."}, m.callHandler)
+	mcp.AddTool(server, &mcp.Tool{Name: "plugin_describe", Description: "Describe plugin methods. Read each method's input_schema, output_schema, required fields, field descriptions, and flags before calling plugin_call."}, m.describeHandler)
+	mcp.AddTool(server, &mcp.Tool{Name: "plugin_call", Description: "Call a plugin method using the exact arguments defined by plugin_describe. Call plugin_describe first when the method schema is not already known."}, m.callHandler)
 }
 
 // listHandler 处理 plugin_list MCP Tool 请求。

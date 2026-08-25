@@ -9,7 +9,6 @@ import (
 	"verix/sdk/protocol"
 )
 
-// GenerateInput 是 generate 方法的输入参数。
 type GenerateInput struct {
 	DSN         string   `json:"dsn"`
 	Tables      []string `json:"tables"`
@@ -17,21 +16,15 @@ type GenerateInput struct {
 	Mode        string   `json:"mode"`
 	OutputDir   string   `json:"output_dir"`
 }
-
-// ListTablesInput 是 list_tables 方法的输入参数。
 type ListTablesInput struct {
 	DSN string `json:"dsn"`
 }
-
-// GenerateFile 是 code 模式返回的单个源码文件。
 type GenerateFile struct {
 	Table   string `json:"table"`
 	Entity  string `json:"entity"`
 	Package string `json:"package"`
 	Code    string `json:"code"`
 }
-
-// GeneratedFileInfo 是 file 模式返回的文件信息，不包含源码。
 type GeneratedFileInfo struct {
 	Table       string `json:"table"`
 	Entity      string `json:"entity"`
@@ -43,12 +36,24 @@ type GeneratedFileInfo struct {
 	Overwritten bool   `json:"overwritten"`
 }
 
+var daoGenerateInputSchema = map[string]any{"type": "object", "properties": map[string]any{
+	"dsn":          map[string]any{"type": "string", "description": "MySQL DSN，包含用户名和密码"},
+	"tables":       map[string]any{"type": "array", "items": map[string]any{"type": "string"}, "description": "要生成的表名列表"},
+	"package_name": map[string]any{"type": "string", "description": "Go 包名，默认 model"},
+	"mode":         map[string]any{"type": "string", "enum": []string{"code", "file"}, "description": "code 返回源码；file 写入 output_dir 并只返回文件信息，默认 code"},
+	"output_dir":   map[string]any{"type": "string", "description": "file 模式必填，输出目录；每张表生成 <output_dir>/<table>.go，已有文件会覆盖"},
+}, "required": []string{"dsn", "tables"}, "additionalProperties": false}
+var daoGenerateOutputSchema = map[string]any{"type": "object", "properties": map[string]any{"files": map[string]any{"type": "array", "items": map[string]any{"type": "object", "additionalProperties": true}}}, "required": []string{"files"}, "additionalProperties": false}
+var daoListInputSchema = map[string]any{"type": "object", "properties": map[string]any{"dsn": map[string]any{"type": "string", "description": "MySQL DSN，包含用户名和密码"}}, "required": []string{"dsn"}, "additionalProperties": false}
+var daoListOutputSchema = map[string]any{"type": "object", "properties": map[string]any{"tables": map[string]any{"type": "array", "items": map[string]any{"type": "string"}}}, "required": []string{"tables"}, "additionalProperties": false}
+
+// main 启动 DAO 插件，并在运行时描述中提供完整输入输出 Schema。
 func main() {
 	_ = plugin.Run(context.Background(), plugin.Options{
 		ID: "com.verix.dao", Name: "dao", Version: "1.1.0", Description: "根据数据库表结构生成符合 Go GORM Model Standards 的 DAO 层代码",
 		Manifest: []protocol.Method{
-			{Name: "generate", Description: "根据 DSN 和表名生成 GORM model 代码，支持返回 code 或直接写入 output_dir", Flags: protocol.MethodFlags{ReadOnly: false, Idempotent: true, SupportsCancellation: true}},
-			{Name: "list_tables", Description: "列出当前数据库的所有表", Flags: protocol.MethodFlags{ReadOnly: true, Idempotent: true}},
+			{Name: "generate", Description: "根据 DSN 和表名生成 GORM model；code 模式返回源码，file 模式写入 output_dir", InputSchema: daoGenerateInputSchema, OutputSchema: daoGenerateOutputSchema, Flags: protocol.MethodFlags{ReadOnly: false, Idempotent: true, SupportsCancellation: true}},
+			{Name: "list_tables", Description: "连接 MySQL 并列出当前数据库的所有表", InputSchema: daoListInputSchema, OutputSchema: daoListOutputSchema, Flags: protocol.MethodFlags{ReadOnly: true, Idempotent: true}},
 		},
 		Methods: map[string]plugin.Handler{"generate": generateHandler, "list_tables": listTablesHandler},
 	})
@@ -85,7 +90,6 @@ func generateHandler(ctx context.Context, call *plugin.Call) (any, error) {
 			return nil, err
 		}
 	}
-
 	db, err := connect(ctx, in.DSN)
 	if err != nil {
 		return nil, fmt.Errorf("connect database: %w", err)
@@ -105,7 +109,6 @@ func generateHandler(ctx context.Context, call *plugin.Call) (any, error) {
 		}
 		renderedFiles = append(renderedFiles, rendered{table: table, entity: m.EntityName, packageName: packageName, code: code})
 	}
-
 	if mode == "code" {
 		files := make([]GenerateFile, 0, len(renderedFiles))
 		for _, f := range renderedFiles {

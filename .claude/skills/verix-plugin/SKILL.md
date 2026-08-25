@@ -13,7 +13,7 @@ description: 生成符合 Verix 插件体系规范的 Go 独立 EXE 插件。当
 2. **插件只依赖两个稳定包**：`verix/sdk/plugin`（插件运行时）和 `verix/sdk/protocol`（跨进程契约）。禁止插件 import `verix/db`、`verix/engine`、`verix/tools`、`verix/core` 或 MCP SDK。
 3. **插件日志写 stderr 或走 `host.log`**，绝不向 stdout 输出非协议内容（stdout 被 RPC 占用）。
 4. **命令路径必须相对插件目录**，`plugin.json` 中的 `runtime.command` 不能是绝对路径或 `..` 逃逸。
-5. **业务方法自己定义**，主程序不理解业务，只负责路由、校验和返回。
+4. **每个业务方法必须声明完整元数据**：`plugin.json` 和 `plugin.Options.Manifest` 都要填写 `description`、`input_schema`、`output_schema`、字段 `description`、`required`、`additionalProperties` 和 `flags`；只写方法名会导致主 MCP 无法把正确参数告诉 LLM。
 
 ## 目录布局
 

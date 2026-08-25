@@ -4,7 +4,7 @@
   "id": "com.verix.dao",
   "name": "dao",
   "display_name": "DAO Generator",
-  "version": "1.0.0",
+  "version": "1.1.0",
   "description": "根据数据库表结构生成符合 Go GORM Model Standards 的 DAO 层代码",
   "runtime": {
     "command": "dao-plugin.exe",

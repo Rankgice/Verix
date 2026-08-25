@@ -290,6 +290,83 @@ func (m *Manager) ensureReady(ctx context.Context, p *instance) error {
 	return nil
 }
 
+// mergeMethod 用运行时方法描述覆盖静态 Manifest 的非空字段，静态字段作为兜底。
+func mergeMethod(static, runtime protocol.Method) protocol.Method {
+	merged := static
+	if runtime.Name != "" {
+		merged.Name = runtime.Name
+	}
+	if runtime.Description != "" {
+		merged.Description = runtime.Description
+	}
+	if len(runtime.InputSchema) > 0 {
+		merged.InputSchema = runtime.InputSchema
+	}
+	if len(runtime.OutputSchema) > 0 {
+		merged.OutputSchema = runtime.OutputSchema
+	}
+	if runtime.Flags != (protocol.MethodFlags{}) {
+		merged.Flags = runtime.Flags
+	}
+	return merged
+}
+
+// mergeDescribe 合并 plugin.json 的静态方法定义与插件运行时 describe 结果。
+func mergeDescribe(manifest protocol.Manifest, runtime protocol.DescribeResult) (protocol.DescribeResult, error) {
+	if runtime.PluginID != "" && runtime.PluginID != manifest.ID {
+		return protocol.DescribeResult{}, fmt.Errorf("plugin id mismatch: manifest=%q runtime=%q", manifest.ID, runtime.PluginID)
+	}
+	if runtime.Version != "" && runtime.Version != manifest.Version {
+		return protocol.DescribeResult{}, fmt.Errorf("plugin version mismatch: manifest=%q runtime=%q", manifest.Version, runtime.Version)
+	}
+
+	result := runtime
+	result.PluginID = manifest.ID
+	result.Version = manifest.Version
+	if result.Name == "" {
+		result.Name = manifest.Name
+	}
+	if result.Description == "" {
+		result.Description = manifest.Description
+	}
+
+	staticByName := make(map[string]protocol.Method, len(manifest.Methods))
+	for _, method := range manifest.Methods {
+		if method.Name == "" {
+			continue
+		}
+		if _, exists := staticByName[method.Name]; exists {
+			return protocol.DescribeResult{}, fmt.Errorf("duplicate manifest method %q", method.Name)
+		}
+		staticByName[method.Name] = method
+	}
+
+	merged := make([]protocol.Method, 0, len(manifest.Methods)+len(runtime.Methods))
+	seen := make(map[string]struct{})
+	for _, method := range runtime.Methods {
+		if method.Name == "" {
+			return protocol.DescribeResult{}, fmt.Errorf("runtime method name is required")
+		}
+		if _, exists := seen[method.Name]; exists {
+			return protocol.DescribeResult{}, fmt.Errorf("duplicate runtime method %q", method.Name)
+		}
+		seen[method.Name] = struct{}{}
+		if static, ok := staticByName[method.Name]; ok {
+			merged = append(merged, mergeMethod(static, method))
+			delete(staticByName, method.Name)
+		} else {
+			merged = append(merged, method)
+		}
+	}
+	for _, method := range manifest.Methods {
+		if _, ok := staticByName[method.Name]; ok {
+			merged = append(merged, method)
+		}
+	}
+	result.Methods = merged
+	return result, nil
+}
+
 // start 启动插件子进程，建立 RPC 连接并完成 initialize/describe 握手。
 func (m *Manager) start(ctx context.Context, p *instance) error {
 	p.startMu.Lock()
@@ -343,8 +420,13 @@ func (m *Manager) start(ctx context.Context, p *instance) error {
 		m.mu.Unlock()
 		return fmt.Errorf("plugin %q protocol version mismatch", p.manifest.ID)
 	}
-	var desc protocol.DescribeResult
-	if err := peer.Call(initCtx, "plugin.describe", map[string]any{}, &desc); err != nil {
+	var runtimeDesc protocol.DescribeResult
+	if err := peer.Call(initCtx, "plugin.describe", map[string]any{}, &runtimeDesc); err != nil {
+		_ = cmd.Process.Kill()
+		return m.fail(p, err)
+	}
+	desc, err := mergeDescribe(p.manifest, runtimeDesc)
+	if err != nil {
 		_ = cmd.Process.Kill()
 		return m.fail(p, err)
 	}
