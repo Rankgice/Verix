@@ -11,7 +11,9 @@ type {{.EntityName}} struct {
 }
 
 // TableName 指定表名
-func ({{.EntityName}}) TableName() string { return "{{.TableName}}" }
+func ({{.EntityName}}) TableName() string {
+    return "{{.TableName}}"
+}
 
 {{- if .SortFields}}
 const (
@@ -68,13 +70,19 @@ type {{.EntityName}}UpdateParams struct {
 }
 
 // {{.EntityName}}Model {{.Comment}}模型
-type {{.EntityName}}Model struct { db *gorm.DB }
+type {{.EntityName}}Model struct {
+    db *gorm.DB
+}
 
 // New{{.EntityName}}Model 创建{{.Comment}}模型
-func New{{.EntityName}}Model(db *gorm.DB) *{{.EntityName}}Model { return &{{.EntityName}}Model{db: db} }
+func New{{.EntityName}}Model(db *gorm.DB) *{{.EntityName}}Model {
+    return &{{.EntityName}}Model{db: db}
+}
 
 // Create 创建{{.Comment}}
-func (m *{{.EntityName}}Model) Create({{.VarName}} *{{.EntityName}}) error { return m.CreateWithTx(nil, {{.VarName}}) }
+func (m *{{.EntityName}}Model) Create({{.VarName}} *{{.EntityName}}) error {
+    return m.CreateWithTx(nil, {{.VarName}})
+}
 
 // CreateWithTx 在事务中创建{{.Comment}}
 func (m *{{.EntityName}}Model) CreateWithTx(tx *gorm.DB, {{.VarName}} *{{.EntityName}}) error {
@@ -121,7 +129,10 @@ func (m *{{.EntityName}}Model) ListByParamWithTx(tx *gorm.DB, params *{{.EntityN
 {{- if .SortFields}}
 	sortBy := {{.EntityName}}OrderField{{(index .SortFields 0).GoName}}
 	if _, ok := {{.LowerEntityName}}OrderFieldMap[params.SortBy]; ok { sortBy = params.SortBy }
-	db = db.Order(clause.OrderByColumn{Column: clause.Column{Name: sortBy}, Desc: params.IsDesc})
+	db = db.Order(clause.OrderByColumn{
+		Column: clause.Column{Name: sortBy},
+    	Desc:   params.IsDesc,
+    })
 {{- end}}
 	var {{.VarNameList}} []*{{.EntityName}}
 	if err := db.Find(&{{.VarNameList}}).Error; err != nil { return nil, 0, err }
@@ -161,8 +172,9 @@ func (m *{{.EntityName}}Model) DeleteByParamWithTx(tx *gorm.DB, params *{{.Entit
 
 {{- if .PrimaryKey}}
 // BatchDelete 批量删除{{.Comment}}
-func (m *{{.EntityName}}Model) BatchDelete(ids []{{.PrimaryKey.GoType}}) (int64, error) { return m.BatchDeleteWithTx(nil, ids) }
-
+func (m *{{.EntityName}}Model) BatchDelete(ids []{{.PrimaryKey.GoType}}) (int64, error) {
+	return m.BatchDeleteWithTx(nil, ids)
+}
 // BatchDeleteWithTx 在事务中批量删除{{.Comment}}
 func (m *{{.EntityName}}Model) BatchDeleteWithTx(tx *gorm.DB, ids []{{.PrimaryKey.GoType}}) (int64, error) {
 	db := m.db
