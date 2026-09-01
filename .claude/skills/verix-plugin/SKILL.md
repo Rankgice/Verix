@@ -235,7 +235,7 @@ plugin.invoke       业务调用统一入口，SDK 分发给 Methods 里的 Hand
 
 1. 确认插件 ID、name、version，以及需要提供哪些业务方法。
 2. 为每个业务方法确定输入 JSON Schema 和输出 JSON Schema。
-3. 生成 `cmd/<name>-plugin/main.go`，用 `plugin.Run` + `plugin.Options` 注册方法。
+3. 生成 `cmd/<name>-plugin/main.go`，用 `plugin.Run` + `plugin.Options` 注册方法。`Options.Manifest` 中必须填写与 `plugin.json` 一致的完整 `InputSchema` 和 `OutputSchema`，不能只填写方法名/描述。
 4. 生成 `plugins/<name>/plugin.json`，填写 runtime、permissions、methods。
 5. 构建并放到 Manifest 声明的路径：
 
