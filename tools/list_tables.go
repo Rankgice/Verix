@@ -5,7 +5,7 @@ import (
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 
-	"verix/db"
+	"github.com/Rankgice/Verix/db"
 )
 
 // ConnectionInput 指定可选命名连接；留空时使用 initialize_db 初始化的运行时连接。

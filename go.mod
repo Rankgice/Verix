@@ -1,4 +1,4 @@
-module verix
+module github.com/Rankgice/Verix
 
 go 1.25.6
 

@@ -7,7 +7,7 @@ import (
 	"os"
 	"strings"
 
-	"verix/engine"
+	"github.com/Rankgice/Verix/engine"
 )
 
 type SpecInput struct {

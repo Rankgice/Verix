@@ -7,8 +7,8 @@ import (
 	"reflect"
 	"testing"
 
-	"verix/engine"
-	"verix/resources"
+	"github.com/Rankgice/Verix/engine"
+	"github.com/Rankgice/Verix/resources"
 )
 
 func TestInitializeTestSpecWorkspaceCreatesFiles(t *testing.T) {

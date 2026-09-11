@@ -5,8 +5,8 @@ import (
 	"fmt"
 	"strings"
 
-	"verix/sdk/plugin"
-	"verix/sdk/protocol"
+	"github.com/Rankgice/Verix/sdk/plugin"
+	"github.com/Rankgice/Verix/sdk/protocol"
 )
 
 // GenerateInput 描述代码生成使用的数据库、表、包名和输出方式。

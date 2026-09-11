@@ -7,8 +7,8 @@ import (
 	"os"
 	"sync"
 
-	"verix/sdk/protocol"
-	"verix/sdk/rpc"
+	"github.com/Rankgice/Verix/sdk/protocol"
+	"github.com/Rankgice/Verix/sdk/rpc"
 )
 
 type Handler func(context.Context, *Call) (any, error)

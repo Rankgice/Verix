@@ -5,7 +5,7 @@ import (
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 
-	"verix/db"
+	"github.com/Rankgice/Verix/db"
 )
 
 // ExecuteSQLInput 描述安全 SQL 执行所需的连接、参数、限制和只读选项。

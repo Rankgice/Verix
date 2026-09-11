@@ -6,7 +6,7 @@ import (
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 
-	"verix/engine"
+	"github.com/Rankgice/Verix/engine"
 )
 
 type ValidateSpecOutput struct {

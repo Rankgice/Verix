@@ -13,7 +13,7 @@ import (
 	"sync"
 	"sync/atomic"
 
-	"verix/sdk/protocol"
+	"github.com/Rankgice/Verix/sdk/protocol"
 )
 
 type Handler func(context.Context, json.RawMessage) (any, *protocol.Error)

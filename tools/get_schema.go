@@ -5,7 +5,7 @@ import (
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 
-	"verix/db"
+	"github.com/Rankgice/Verix/db"
 )
 
 // GetSchemaOutput 复用数据库层定义的轻量 Schema 结果。

@@ -10,7 +10,7 @@ import (
 	"testing"
 	"time"
 
-	"verix/sdk/protocol"
+	"github.com/Rankgice/Verix/sdk/protocol"
 )
 
 // TestPeerSupportsBidirectionalCalls 验证连接双方可以在同一条 RPC 通道上互相发起请求。

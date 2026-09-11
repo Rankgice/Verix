@@ -8,8 +8,8 @@ import (
 	"path/filepath"
 	"strings"
 
-	"verix/engine"
-	"verix/resources"
+	"github.com/Rankgice/Verix/engine"
+	"github.com/Rankgice/Verix/resources"
 )
 
 const (

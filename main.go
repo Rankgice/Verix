@@ -6,7 +6,7 @@ import (
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 
-	"verix/core"
+	"github.com/Rankgice/Verix/core"
 )
 
 func main() {

@@ -5,7 +5,7 @@ import (
 	"path/filepath"
 	"testing"
 
-	"verix/sdk/protocol"
+	"github.com/Rankgice/Verix/sdk/protocol"
 )
 
 // TestValidateManifestRejectsEscapingCommand 验证插件命令不能逃出自己的目录。

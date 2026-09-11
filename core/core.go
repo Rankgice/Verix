@@ -5,9 +5,9 @@ import (
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 
-	"verix/pluginhost"
-	"verix/resources"
-	"verix/tools"
+	"github.com/Rankgice/Verix/pluginhost"
+	"github.com/Rankgice/Verix/resources"
+	"github.com/Rankgice/Verix/tools"
 )
 
 // NewServer 创建并组装 Verix MCP Server，同时注册现有能力和插件管理能力。

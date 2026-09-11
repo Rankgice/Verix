@@ -14,8 +14,8 @@ import (
 	"sync"
 	"time"
 
-	"verix/sdk/protocol"
-	"verix/sdk/rpc"
+	"github.com/Rankgice/Verix/sdk/protocol"
+	"github.com/Rankgice/Verix/sdk/rpc"
 )
 
 type Status string

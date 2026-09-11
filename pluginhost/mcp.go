@@ -8,7 +8,7 @@ import (
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 
-	"verix/sdk/protocol"
+	"github.com/Rankgice/Verix/sdk/protocol"
 )
 
 type PluginListInput struct{}

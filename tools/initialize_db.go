@@ -5,7 +5,7 @@ import (
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 
-	"verix/db"
+	"github.com/Rankgice/Verix/db"
 )
 
 // InitializeDBInput 描述运行时数据库的 DSN、类型和只读模式。

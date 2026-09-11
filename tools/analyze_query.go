@@ -5,7 +5,7 @@ import (
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 
-	"verix/db"
+	"github.com/Rankgice/Verix/db"
 )
 
 // AnalyzeQueryInput 保存仅分析而不执行的 SQL 文本。

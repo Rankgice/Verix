@@ -4,7 +4,7 @@ import (
 	"encoding/json"
 	"testing"
 
-	"verix/engine"
+	"github.com/Rankgice/Verix/engine"
 )
 
 func TestExampleHTTPTestSpecCoversSupportedHTTPAssertions(t *testing.T) {
