@@ -11,9 +11,12 @@ import (
 	"testing"
 )
 
+// TestParseGRPCVerboseOutputExtractsHeadersAndBody 验证 grpcurl 输出能够解析出响应头和正文。
 func TestParseGRPCVerboseOutputExtractsHeadersAndBody(t *testing.T) {
+	// 准备包含响应头、正文和尾部统计信息的典型 grpcurl 输出。
 	stdout := "\nRequest metadata to send:\nauthorization: Bearer demo\n\nResponse headers received:\ncontent-type: application/grpc\nx-request-id: req-1\n\nResponse contents:\n{\n  \"user\": {\n    \"id\": \"123\",\n    \"name\": \"User 123\"\n  }\n}\n\nResponse trailers received:\n(empty)\n\nSent 1 request and received 1 response\n"
 
+	// 调用解析器并分别校验结构化的头和正文。
 	headers, body := parseGRPCVerboseOutput([]byte(stdout))
 
 	wantHeaders := map[string]string{
@@ -34,12 +37,16 @@ func TestParseGRPCVerboseOutputExtractsHeadersAndBody(t *testing.T) {
 	}
 }
 
+// TestExecuteGRPCCapturesInitialMetadata 验证 gRPC 调用会捕获初始元数据并正确替换变量。
 func TestExecuteGRPCCapturesInitialMetadata(t *testing.T) {
+	// 保存全局命令工厂，测试结束后恢复，避免影响其他测试。
 	previousExec := execCommandContext
 	t.Cleanup(func() { execCommandContext = previousExec })
 
+	// 记录执行器构造的命令名和参数，验证变量替换及 grpcurl 选项。
 	var gotName string
 	var gotArgs []string
+	// 模拟 grpcurl 失败，并输出可供解析的格式化错误码。
 	execCommandContext = func(ctx context.Context, name string, args ...string) *exec.Cmd {
 		gotName = name
 		gotArgs = append([]string(nil), args...)
@@ -48,6 +55,7 @@ func TestExecuteGRPCCapturesInitialMetadata(t *testing.T) {
 		})
 	}
 
+	// 构造带有默认目标、默认元数据和占位符的测试规格。
 	spec := &TestSpec{
 		Meta: Meta{
 			ProtocolDefaults: ProtocolDefaults{
@@ -61,6 +69,7 @@ func TestExecuteGRPCCapturesInitialMetadata(t *testing.T) {
 			},
 		},
 	}
+	// 构造包含请求元数据和消息变量的 gRPC 请求。
 	request := GRPCRequest{
 		Service: "user.v1.UserService",
 		Method:  "GetUser",
@@ -71,6 +80,7 @@ func TestExecuteGRPCCapturesInitialMetadata(t *testing.T) {
 			"user_id": "{{vars.user_id}}",
 		},
 	}
+	// 准备供目标地址、元数据和消息使用的变量。
 	vars := map[string]any{
 		"grpc_target": "127.0.0.1:50051",
 		"tenant_id":   "tenant-a",
@@ -78,6 +88,7 @@ func TestExecuteGRPCCapturesInitialMetadata(t *testing.T) {
 		"user_id":     "123",
 	}
 
+	// 执行模拟的 gRPC 调用，然后验证返回的各个统一结果字段。
 	code, headers, body, endpoint, err := executeGRPC(context.Background(), spec, request, vars)
 	if err != nil {
 		t.Fatalf("executeGRPC returned error: %v", err)
@@ -118,6 +129,7 @@ func TestExecuteGRPCCapturesInitialMetadata(t *testing.T) {
 	}
 }
 
+// TestExecuteGRPCParsesFormattedStatusCode 验证错误输出中的格式化状态码能够被识别。
 func TestExecuteGRPCParsesFormattedStatusCode(t *testing.T) {
 	previousExec := execCommandContext
 	t.Cleanup(func() { execCommandContext = previousExec })
@@ -164,6 +176,7 @@ func TestExecuteGRPCParsesFormattedStatusCode(t *testing.T) {
 	}
 }
 
+// TestEvaluateExpectSupportsGRPCHeaders 验证 gRPC 初始元数据可复用统一 headers 断言。
 func TestEvaluateExpectSupportsGRPCHeaders(t *testing.T) {
 	code := "OK"
 	expect := Expect{
@@ -173,6 +186,7 @@ func TestEvaluateExpectSupportsGRPCHeaders(t *testing.T) {
 		},
 	}
 
+	// 对 gRPC 状态码和初始元数据执行统一断言。
 	assertions, diffs := evaluateExpect(expect, "grpc", nil, &code, map[string]string{"content-type": "application/grpc"}, map[string]any{})
 	if len(assertions) != 2 {
 		t.Fatalf("unexpected assertion count: %d", len(assertions))
@@ -182,14 +196,17 @@ func TestEvaluateExpectSupportsGRPCHeaders(t *testing.T) {
 	}
 }
 
+// helperCommandOptions 描述测试辅助进程要输出的内容和退出码。
 type helperCommandOptions struct {
 	stdout   string
 	stderr   string
 	exitCode int
 }
 
+// helperCommand 创建测试用的子进程命令，用于模拟 grpcurl 的标准输出和错误输出。
 func helperCommand(t *testing.T, opts helperCommandOptions) *exec.Cmd {
 	t.Helper()
+	// 重新启动当前测试二进制，并通过环境变量传递模拟输出。
 	cmd := exec.Command(os.Args[0], "-test.run=TestHelperProcess", "--")
 	cmd.Env = append(os.Environ(),
 		"GO_WANT_HELPER_PROCESS=1",
@@ -200,10 +217,12 @@ func helperCommand(t *testing.T, opts helperCommandOptions) *exec.Cmd {
 	return cmd
 }
 
+// TestHelperProcess 是被 helperCommand 调用的子进程入口。
 func TestHelperProcess(t *testing.T) {
 	if os.Getenv("GO_WANT_HELPER_PROCESS") != "1" {
 		return
 	}
+	// 解码父进程传入的标准输出和标准错误内容。
 	stdout, _ := base64.StdEncoding.DecodeString(os.Getenv("GO_HELPER_STDOUT"))
 	stderr, _ := base64.StdEncoding.DecodeString(os.Getenv("GO_HELPER_STDERR"))
 	_, _ = os.Stdout.Write(stdout)
@@ -212,7 +231,9 @@ func TestHelperProcess(t *testing.T) {
 	os.Exit(exitCode)
 }
 
+// containsString 判断字符串切片中是否包含指定值。
 func containsString(values []string, want string) bool {
+	// 顺序扫描切片，命中目标值后立即返回。
 	for _, value := range values {
 		if value == want {
 			return true

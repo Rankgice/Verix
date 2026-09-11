@@ -15,9 +15,11 @@ import (
 	mysqldriver "github.com/go-sql-driver/mysql"
 )
 
+// TestInitializeRuntimeConnectionPersistsFileAndInstallsRuntimeState 验证 MySQL 运行时初始化会持久化原始状态并安装只读连接。
 func TestInitializeRuntimeConnectionPersistsFileAndInstallsRuntimeState(t *testing.T) {
 	const wantDSN = "user:pass@tcp(localhost:3306)/app?parseTime=true"
 
+	// 使用临时状态路径和可控时钟，避免测试依赖真实项目配置。
 	manager := NewManagerFromEnv(DefaultConnectionsEnvVar, func(string) string { return "" })
 	manager.runtimeStatePath = filepath.Join(t.TempDir(), ".mcp", "db.json")
 
@@ -25,6 +27,7 @@ func TestInitializeRuntimeConnectionPersistsFileAndInstallsRuntimeState(t *testi
 	manager.now = func() time.Time { return now }
 
 	var pingCount int32
+	// 注入只支持 Ping 的连接池，以校验驱动、只读 DSN 和连接次数。
 	manager.openDB = func(driverName, dsn string) (*sql.DB, error) {
 		if driverName != DriverMySQL {
 			t.Fatalf("unexpected driver: %s", driverName)
@@ -34,6 +37,7 @@ func TestInitializeRuntimeConnectionPersistsFileAndInstallsRuntimeState(t *testi
 	}
 	t.Cleanup(func() { closeManagerConnections(manager) })
 
+	// 初始化后同时校验 Tool 结果、磁盘状态和内存运行时状态。
 	out, err := manager.InitializeRuntimeConnection(context.Background(), wantDSN, DriverMySQL, true)
 	if err != nil {
 		t.Fatalf("InitializeRuntimeConnection returned error: %v", err)
@@ -93,6 +97,7 @@ func TestInitializeRuntimeConnectionPersistsFileAndInstallsRuntimeState(t *testi
 	}
 }
 
+// TestInitializeRuntimeConnectionLoadsPersistedStateWhenDatabaseURLEmpty 验证空 DSN 会从状态文件恢复运行时连接。
 func TestInitializeRuntimeConnectionLoadsPersistedStateWhenDatabaseURLEmpty(t *testing.T) {
 	const wantDSN = "user:pass@tcp(localhost:3306)/persisted?parseTime=true"
 
@@ -142,6 +147,7 @@ func TestInitializeRuntimeConnectionLoadsPersistedStateWhenDatabaseURLEmpty(t *t
 	}
 }
 
+// TestExecuteSQLUsesRuntimeConnectionWhenConnectionEmpty 验证 execute_sql 在连接名为空时使用运行时执行器。
 func TestExecuteSQLUsesRuntimeConnectionWhenConnectionEmpty(t *testing.T) {
 	now := time.Date(2026, 4, 22, 9, 0, 0, 0, time.UTC)
 	var used bool
@@ -179,6 +185,7 @@ func TestExecuteSQLUsesRuntimeConnectionWhenConnectionEmpty(t *testing.T) {
 	}
 }
 
+// TestGetConnectionRefreshesRuntimeLease 验证访问有效运行时连接会滑动续租。
 func TestGetConnectionRefreshesRuntimeLease(t *testing.T) {
 	now := time.Date(2026, 4, 22, 9, 0, 0, 0, time.UTC)
 
@@ -204,6 +211,7 @@ func TestGetConnectionRefreshesRuntimeLease(t *testing.T) {
 	}
 }
 
+// TestGetConnectionReloadsExpiredRuntimeStateFromFile 验证过期运行时连接会从文件重建并关闭旧连接。
 func TestGetConnectionReloadsExpiredRuntimeStateFromFile(t *testing.T) {
 	const persistedDSN = "user:pass@tcp(localhost:3306)/rehydrated?parseTime=true"
 
@@ -276,6 +284,7 @@ func TestGetConnectionReloadsExpiredRuntimeStateFromFile(t *testing.T) {
 	}
 }
 
+// TestGetConnectionColdStartSerializesRuntimeLoad 验证并发冷启动只会打开一次运行时数据库。
 func TestGetConnectionColdStartSerializesRuntimeLoad(t *testing.T) {
 	const persistedDSN = "user:pass@tcp(localhost:3306)/coldstart?parseTime=true"
 
@@ -320,8 +329,10 @@ func TestGetConnectionColdStartSerializesRuntimeLoad(t *testing.T) {
 		closeManagerConnections(manager)
 	})
 
+	// 预先占用初始化锁，让两个调用同时排队，从而稳定复现冷启动竞争。
 	manager.runtimeInitMu.Lock()
 
+	// result 收集每个并发调用返回的连接和错误。
 	type result struct {
 		conn *Connection
 		err  error
@@ -330,6 +341,7 @@ func TestGetConnectionColdStartSerializesRuntimeLoad(t *testing.T) {
 	results := make(chan result, 2)
 	start := make(chan struct{})
 	for range 2 {
+		// 两个 goroutine 在同一信号后同时请求空名称的运行时连接。
 		go func() {
 			<-start
 			conn, err := manager.GetConnection(context.Background(), "")
@@ -368,6 +380,7 @@ func TestGetConnectionColdStartSerializesRuntimeLoad(t *testing.T) {
 	}
 }
 
+// TestGetConnectionUsesNamedEnvConnectionWhenProvided 验证显式连接名优先使用环境变量中的命名连接。
 func TestGetConnectionUsesNamedEnvConnectionWhenProvided(t *testing.T) {
 	manager := NewManagerFromEnv(DefaultConnectionsEnvVar, func(string) string {
 		return `{"analytics":{"dsn":"user:pass@tcp(localhost:3306)/analytics?parseTime=true"}}`
@@ -401,6 +414,7 @@ func TestGetConnectionUsesNamedEnvConnectionWhenProvided(t *testing.T) {
 	}
 }
 
+// assertMySQLReadOnlyDSN 校验只读参数已添加且原 MySQL DSN 参数未丢失。
 func assertMySQLReadOnlyDSN(t *testing.T, gotDSN string, wantBaseDSN string) {
 	t.Helper()
 
@@ -423,6 +437,7 @@ func assertMySQLReadOnlyDSN(t *testing.T, gotDSN string, wantBaseDSN string) {
 	}
 }
 
+// closeManagerConnections 关闭测试 Manager 持有的运行时连接和命名连接。
 func closeManagerConnections(manager *Manager) {
 	if manager == nil {
 		return
@@ -437,6 +452,7 @@ func closeManagerConnections(manager *Manager) {
 	}
 }
 
+// newPingOnlyDB 创建只实现 Ping 和 Close 的 database/sql 测试连接池。
 func newPingOnlyDB(pingErr error, pingCount *int32, closeCount *int32) *sql.DB {
 	return sql.OpenDB(pingOnlyConnector{
 		pingErr:    pingErr,
@@ -445,12 +461,14 @@ func newPingOnlyDB(pingErr error, pingCount *int32, closeCount *int32) *sql.DB {
 	})
 }
 
+// pingOnlyConnector 向 database/sql 提供可观测 Ping 和 Close 次数的测试连接。
 type pingOnlyConnector struct {
 	pingErr    error
 	pingCount  *int32
 	closeCount *int32
 }
 
+// Connect 返回共享计数器的轻量测试连接。
 func (c pingOnlyConnector) Connect(context.Context) (driver.Conn, error) {
 	return &pingOnlyConn{
 		pingErr:    c.pingErr,
@@ -459,26 +477,32 @@ func (c pingOnlyConnector) Connect(context.Context) (driver.Conn, error) {
 	}, nil
 }
 
+// Driver 返回满足 driver.Connector 契约的占位驱动。
 func (c pingOnlyConnector) Driver() driver.Driver {
 	return pingOnlyDriver{}
 }
 
+// pingOnlyDriver 仅用于满足 database/sql 驱动接口。
 type pingOnlyDriver struct{}
 
+// Open 不应由 sql.OpenDB 路径调用，因此固定返回未实现错误。
 func (pingOnlyDriver) Open(string) (driver.Conn, error) {
 	return nil, errors.New("not implemented")
 }
 
+// pingOnlyConn 实现测试所需的 driver.Conn 和 driver.Pinger 最小能力。
 type pingOnlyConn struct {
 	pingErr    error
 	pingCount  *int32
 	closeCount *int32
 }
 
+// Prepare 不属于当前测试路径，因此固定返回未实现错误。
 func (c *pingOnlyConn) Prepare(string) (driver.Stmt, error) {
 	return nil, errors.New("not implemented")
 }
 
+// Close 记录连接关闭次数。
 func (c *pingOnlyConn) Close() error {
 	if c.closeCount != nil {
 		atomic.AddInt32(c.closeCount, 1)
@@ -486,10 +510,12 @@ func (c *pingOnlyConn) Close() error {
 	return nil
 }
 
+// Begin 不属于当前测试路径，因此固定返回未实现错误。
 func (c *pingOnlyConn) Begin() (driver.Tx, error) {
 	return nil, errors.New("not implemented")
 }
 
+// Ping 记录调用次数并返回预设错误。
 func (c *pingOnlyConn) Ping(context.Context) error {
 	if c.pingCount != nil {
 		atomic.AddInt32(c.pingCount, 1)

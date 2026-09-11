@@ -208,12 +208,13 @@ plugin.invoke       业务调用统一入口，SDK 分发给 Methods 里的 Hand
 
 ## DAO 生成插件的输出模式
 
-项目中的 `com.verix.dao` 插件支持两种模式：
+项目中的 `com.verix.dao` 插件通过 GORM 支持 MySQL 和 SQLite；`db_type` 省略时默认 MySQL。它支持两种输出模式：
 
 ```json
 {
+  "db_type": "sqlite",
   "mode": "code",
-  "dsn": "...",
+  "dsn": "file:local.db",
   "tables": ["category"]
 }
 ```
@@ -222,8 +223,9 @@ plugin.invoke       业务调用统一入口，SDK 分发给 Methods 里的 Hand
 
 ```json
 {
+  "db_type": "mysql",
   "mode": "file",
-  "dsn": "...",
+  "dsn": "root:pass@tcp(127.0.0.1:3306)/mydb?parseTime=true",
   "tables": ["category", "user_group"],
   "output_dir": "D:/project/internal/model"
 }

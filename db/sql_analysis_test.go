@@ -7,11 +7,13 @@ import (
 	"testing"
 )
 
+// fakeExecutor 通过函数注入模拟 Query 和 Exec，用于隔离测试 Manager 的执行流程。
 type fakeExecutor struct {
 	query func(ctx context.Context, sql string, args ...any) (*QueryResult, error)
 	exec  func(ctx context.Context, sql string, args ...any) (*ExecResult, error)
 }
 
+// Query 调用测试注入的查询函数。
 func (f fakeExecutor) Query(ctx context.Context, sql string, args ...any) (*QueryResult, error) {
 	if f.query == nil {
 		return nil, nil
@@ -19,6 +21,7 @@ func (f fakeExecutor) Query(ctx context.Context, sql string, args ...any) (*Quer
 	return f.query(ctx, sql, args...)
 }
 
+// Exec 调用测试注入的非查询执行函数。
 func (f fakeExecutor) Exec(ctx context.Context, sql string, args ...any) (*ExecResult, error) {
 	if f.exec == nil {
 		return nil, nil
@@ -26,14 +29,17 @@ func (f fakeExecutor) Exec(ctx context.Context, sql string, args ...any) (*ExecR
 	return f.exec(ctx, sql, args...)
 }
 
+// GetSchema 返回空结构以满足 DBExecutor 接口。
 func (fakeExecutor) GetSchema(ctx context.Context) (*Schema, error) {
 	return &Schema{}, nil
 }
 
+// DescribeTable 返回仅包含表名的结构以满足 DBExecutor 接口。
 func (fakeExecutor) DescribeTable(ctx context.Context, table string) (*TableSchema, error) {
 	return &TableSchema{Table: table}, nil
 }
 
+// TestAnalyzeSQLSelectMissingLimit 验证 SELECT 表提取和缺少 LIMIT 的安全提示。
 func TestAnalyzeSQLSelectMissingLimit(t *testing.T) {
 	analysis, err := AnalyzeSQL("SELECT u.id, o.id FROM users u JOIN orders o ON o.user_id = u.id")
 	if err != nil {
@@ -57,6 +63,7 @@ func TestAnalyzeSQLSelectMissingLimit(t *testing.T) {
 	}
 }
 
+// TestAnalyzeSQLWithCTEFindsMainOperation 验证 WITH 子句不会遮蔽主 SELECT 操作。
 func TestAnalyzeSQLWithCTEFindsMainOperation(t *testing.T) {
 	analysis, err := AnalyzeSQL(`WITH recent AS (SELECT * FROM orders LIMIT 5) SELECT * FROM recent`)
 	if err != nil {
@@ -74,7 +81,9 @@ func TestAnalyzeSQLWithCTEFindsMainOperation(t *testing.T) {
 	}
 }
 
+// TestValidateExecutionRejectsDangerousStatements 验证危险、多语句及只读写入都会被拒绝。
 func TestValidateExecutionRejectsDangerousStatements(t *testing.T) {
+	// 表驱动覆盖每一种必须拦截的安全规则。
 	tests := []struct {
 		name      string
 		sql       string
@@ -106,6 +115,7 @@ func TestValidateExecutionRejectsDangerousStatements(t *testing.T) {
 	}
 }
 
+// TestAnalyzeSQLFlagsMultipleStatements 验证多语句输入被标记为高风险。
 func TestAnalyzeSQLFlagsMultipleStatements(t *testing.T) {
 	analysis, err := AnalyzeSQL("SELECT * FROM users; DELETE FROM users WHERE id = 1")
 	if err != nil {
@@ -125,6 +135,7 @@ func TestAnalyzeSQLFlagsMultipleStatements(t *testing.T) {
 	}
 }
 
+// TestRewriteSelectLimitAppendsBeforeSemicolon 验证自动 LIMIT 位于尾部分号之前。
 func TestRewriteSelectLimitAppendsBeforeSemicolon(t *testing.T) {
 	rewritten, truncated, err := RewriteSelectLimit("SELECT * FROM users;   ", 25)
 	if err != nil {
@@ -138,6 +149,7 @@ func TestRewriteSelectLimitAppendsBeforeSemicolon(t *testing.T) {
 	}
 }
 
+// TestRewriteSelectLimitLeavesExistingLimit 验证已有 LIMIT 的 SQL 保持不变。
 func TestRewriteSelectLimitLeavesExistingLimit(t *testing.T) {
 	original := "SELECT * FROM users LIMIT 10"
 	rewritten, truncated, err := RewriteSelectLimit(original, 25)
@@ -152,8 +164,10 @@ func TestRewriteSelectLimitLeavesExistingLimit(t *testing.T) {
 	}
 }
 
+// TestBindNamedParamsReplacesPlaceholdersOutsideStringsAndComments 验证仅替换有效命名参数并展开切片。
 func TestBindNamedParamsReplacesPlaceholdersOutsideStringsAndComments(t *testing.T) {
 	sqlText := "SELECT * FROM users WHERE id = :id AND note = ':ignored' -- :comment\nAND status IN (:statuses)"
+	// 字符串和注释内的冒号保持原样，切片参数展开为对应数量的问号。
 	rewritten, args, err := BindNamedParams(sqlText, map[string]any{
 		"id":       7,
 		"statuses": []string{"active", "pending"},
@@ -171,6 +185,7 @@ func TestBindNamedParamsReplacesPlaceholdersOutsideStringsAndComments(t *testing
 	}
 }
 
+// TestBindNamedParamsReturnsErrorForMissingValue 验证缺少命名参数值时返回明确错误。
 func TestBindNamedParamsReturnsErrorForMissingValue(t *testing.T) {
 	_, _, err := BindNamedParams("SELECT * FROM users WHERE id = :id", map[string]any{})
 	if err == nil {
@@ -181,6 +196,7 @@ func TestBindNamedParamsReturnsErrorForMissingValue(t *testing.T) {
 	}
 }
 
+// TestBindNamedParamsRejectsEmptySlices 验证空切片不会生成非法 IN 参数列表。
 func TestBindNamedParamsRejectsEmptySlices(t *testing.T) {
 	_, _, err := BindNamedParams("SELECT * FROM users WHERE id IN (:ids)", map[string]any{"ids": []int{}})
 	if err == nil {
@@ -191,8 +207,10 @@ func TestBindNamedParamsRejectsEmptySlices(t *testing.T) {
 	}
 }
 
+// TestExecuteSQLMarksTruncatedOnlyWhenRowsWereActuallyClipped 验证多取一行后才标记结果截断。
 func TestExecuteSQLMarksTruncatedOnlyWhenRowsWereActuallyClipped(t *testing.T) {
 	var capturedSQL string
+	// 注入返回 limit+1 行的执行器，模拟数据库中仍有更多结果。
 	manager := &Manager{
 		conns: map[string]*Connection{
 			"primary": {
@@ -233,7 +251,9 @@ func TestExecuteSQLMarksTruncatedOnlyWhenRowsWereActuallyClipped(t *testing.T) {
 	}
 }
 
+// containsString 判断测试结果切片中是否包含指定字符串。
 func containsString(values []string, want string) bool {
+	// 顺序扫描即可保持辅助函数简单且确定。
 	for _, value := range values {
 		if value == want {
 			return true

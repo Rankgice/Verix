@@ -11,14 +11,18 @@ import (
 	_ "github.com/go-sql-driver/mysql"
 )
 
+// mysqlExecutor 实现 MySQL 的 SQL 执行和 information_schema 元数据读取。
 type mysqlExecutor struct {
+	// db 是由 Manager 创建并统一管理生命周期的连接池。
 	db *sql.DB
 }
 
+// newMySQLExecutor 使用已有连接池创建 MySQL 执行器。
 func newMySQLExecutor(db *sql.DB) *mysqlExecutor {
 	return &mysqlExecutor{db: db}
 }
 
+// Query 执行返回结果集的 MySQL 语句，并转换为统一查询结果。
 func (m *mysqlExecutor) Query(ctx context.Context, sqlText string, args ...any) (*QueryResult, error) {
 	rows, err := m.db.QueryContext(ctx, sqlText, args...)
 	if err != nil {
@@ -26,6 +30,7 @@ func (m *mysqlExecutor) Query(ctx context.Context, sqlText string, args ...any) 
 	}
 	defer rows.Close()
 
+	// ColumnTypes 提供结果列名称及 MySQL 类型，供 Tool 返回结构化元数据。
 	columnTypes, err := rows.ColumnTypes()
 	if err != nil {
 		return nil, err
@@ -39,6 +44,7 @@ func (m *mysqlExecutor) Query(ctx context.Context, sqlText string, args ...any) 
 		}
 	}
 
+	// Scan 目标在行间复用，每次读取后复制并规范化为独立结果行。
 	scanValues := make([]any, len(columns))
 	scanTargets := make([]any, len(columns))
 	for i := range scanTargets {
@@ -67,6 +73,7 @@ func (m *mysqlExecutor) Query(ctx context.Context, sqlText string, args ...any) 
 	}, nil
 }
 
+// Exec 执行不返回结果集的 MySQL 语句，并读取影响行数和最后插入 ID。
 func (m *mysqlExecutor) Exec(ctx context.Context, sqlText string, args ...any) (*ExecResult, error) {
 	result, err := m.db.ExecContext(ctx, sqlText, args...)
 	if err != nil {
@@ -78,6 +85,7 @@ func (m *mysqlExecutor) Exec(ctx context.Context, sqlText string, args ...any) (
 		return nil, err
 	}
 
+	// 并非所有语句都支持 LastInsertId，不支持时保持 nil 而不影响执行结果。
 	var lastInsertID *int64
 	if id, err := result.LastInsertId(); err == nil {
 		lastInsertID = &id
@@ -89,6 +97,7 @@ func (m *mysqlExecutor) Exec(ctx context.Context, sqlText string, args ...any) (
 	}, nil
 }
 
+// ListTables 使用 SHOW TABLES 返回当前 MySQL 数据库中的表名。
 func (m *mysqlExecutor) ListTables(ctx context.Context) ([]string, error) {
 	rows, err := m.db.QueryContext(ctx, "SHOW TABLES")
 	if err != nil {
@@ -108,16 +117,19 @@ func (m *mysqlExecutor) ListTables(ctx context.Context) ([]string, error) {
 		return nil, err
 	}
 
+	// 排序保证不同 MySQL 版本和连接设置下输出顺序稳定。
 	sort.Strings(tables)
 	return tables, nil
 }
 
+// GetSchema 从 information_schema 返回当前数据库的表名和列名概览。
 func (m *mysqlExecutor) GetSchema(ctx context.Context) (*Schema, error) {
 	tables, err := m.ListTables(ctx)
 	if err != nil {
 		return nil, err
 	}
 
+	// information_schema.columns 按表和列序号返回，保留建表时的列顺序。
 	rows, err := m.db.QueryContext(ctx, `
 SELECT TABLE_NAME, COLUMN_NAME
 FROM information_schema.columns
@@ -152,7 +164,9 @@ ORDER BY TABLE_NAME, ORDINAL_POSITION`)
 	return &Schema{Tables: schemaTables}, nil
 }
 
+// DescribeTable 从 information_schema 读取指定 MySQL 表的列、外键和索引。
 func (m *mysqlExecutor) DescribeTable(ctx context.Context, table string) (*TableSchema, error) {
+	// 第一步读取列定义，并建立列名到结果下标的映射供外键回填。
 	columnRows, err := m.db.QueryContext(ctx, `
 SELECT COLUMN_NAME, DATA_TYPE, IS_NULLABLE, COLUMN_KEY, COLUMN_DEFAULT, EXTRA
 FROM information_schema.columns
@@ -198,6 +212,7 @@ ORDER BY ORDINAL_POSITION`, table)
 		return nil, fmt.Errorf("table %q not found in current database", table)
 	}
 
+	// 第二步读取外键，并将引用目标合并到对应列。
 	foreignKeyRows, err := m.db.QueryContext(ctx, `
 SELECT COLUMN_NAME, REFERENCED_TABLE_NAME, REFERENCED_COLUMN_NAME
 FROM information_schema.key_column_usage
@@ -229,6 +244,7 @@ ORDER BY ORDINAL_POSITION`, table)
 		return nil, err
 	}
 
+	// 第三步读取索引；复合索引的多行按索引名聚合并保留列顺序。
 	indexRows, err := m.db.QueryContext(ctx, `
 SELECT INDEX_NAME, NON_UNIQUE, COLUMN_NAME
 FROM information_schema.statistics
@@ -270,7 +286,9 @@ ORDER BY INDEX_NAME, SEQ_IN_INDEX`, table)
 	}, nil
 }
 
+// normalizeSQLValue 将数据库驱动值转换为稳定且可 JSON 序列化的值。
 func normalizeSQLValue(value any) any {
+	// []byte 默认转换为文本，时间值统一输出 RFC3339Nano。
 	switch v := value.(type) {
 	case nil:
 		return nil

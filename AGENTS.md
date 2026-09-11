@@ -21,6 +21,7 @@ verix/
 ├── main.go            # stdio MCP bootstrap
 ├── core/              # server assembly (register tools/resources)
 ├── tools/             # MCP tool handlers + spec loading
+├── db/                # MySQL/SQLite connection, safe SQL, and schema adapters
 ├── engine/            # TestSpec schema + execution/diff engine (complex hotspot)
 ├── resources/         # built-in example TestSpec resource URI
 ├── test.json          # local sample spec (includes intentional failure case)
@@ -33,16 +34,21 @@ verix/
 | Server startup path | `main.go`, `core/core.go` | `main -> core.NewServer -> Run(stdio)` |
 | Register MCP tools | `tools/run_spec.go`, `tools/validate_spec.go`, `tools/initialize_testspec.go` | Tool names include `run_testspec`, `validate_testspec`, `initialize_testspec` |
 | Parse/ingest input spec | `tools/common.go` | `spec_path` or `spec_json` required |
+| Database tools | `tools/initialize_db.go`, `tools/execute_sql.go`, `tools/list_tables.go`, `tools/get_schema.go`, `tools/describe_table.go` | Runtime or named MySQL/SQLite connections |
+| Database adapters | `db/mysql.go`, `db/sqlite.go`, `db/manager.go` | Keep driver-specific schema SQL behind `DBExecutor` |
 | Spec schema contract | `engine/types.go` | Source of truth for TestSpec fields |
 | Runtime + assertions + diffs | `engine/runner.go` | HTTP/gRPC execution, expect DSL, diagnosis |
 | Built-in example payloads | `resources/examples.go` | URIs: `verix://examples/testspec/basic-http`, `verix://examples/testspec/basic-grpc` |
 
 ## CONVENTIONS (PROJECT-SPECIFIC)
 - Go toolchain target: `go 1.25.6` (`go.mod`).
+- 所有新增或修改的方法都必须添加中文方法注释，说明用途、主要入参与返回结果；复杂分支、协议适配、安全校验等关键代码位置也必须添加中文注释，解释实现意图和使用约束。
 - No CI/workflow files, no Makefile, no npm/pnpm scripts.
 - Runtime path is MCP stdio transport, not HTTP listener startup.
 - Register tools/resources before `server.Run(...)`; startup assumes capabilities are predeclared.
 - Prefer `mcp.AddTool(...)` wrappers for tool registration/schema handling.
+- DB Tools support `mysql` and `sqlite`; named connections come from `VERIX_DB_CONNECTIONS`, while an omitted connection name uses the state initialized by `initialize_db`.
+- SQLite accepts a file path, `:memory:`, or a `file:` URI; runtime readonly mode rewrites file connections to `mode=ro`.
 - `spec_path` takes precedence when both `spec_path` and `spec_json` are set.
 - Relative HTTP request paths require `meta.protocol_defaults.http.base_url`.
 - gRPC execution shells out to `grpcurl`; environment must provide it in `PATH`.

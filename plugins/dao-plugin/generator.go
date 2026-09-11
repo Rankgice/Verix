@@ -1,9 +1,7 @@
 package main
 
 import (
-	"context"
 	"crypto/sha256"
-	"database/sql"
 	"encoding/hex"
 	"errors"
 	"fmt"
@@ -12,23 +10,9 @@ import (
 	"path/filepath"
 	"strings"
 	"sync"
-
-	_ "github.com/go-sql-driver/mysql"
 )
 
 var outputDirLocks sync.Map
-
-// columnInfo 是从 information_schema 读到的原始列信息。
-type columnInfo struct {
-	Name       string
-	DataType   string
-	ColumnType string
-	Nullable   bool
-	ColumnKey  string
-	Default    string
-	Extra      string
-	Comment    string
-}
 
 // FieldModel 是传给模板的单个字段描述。
 type FieldModel struct {
@@ -72,77 +56,12 @@ type TableModel struct {
 	UpdatableFields    []FieldModel
 }
 
-// connect 使用 DSN 打开 MySQL 连接并做连通性校验。
-func connect(ctx context.Context, dsn string) (*sql.DB, error) {
-	db, err := sql.Open("mysql", dsn)
-	if err != nil {
-		return nil, err
-	}
-	if err := db.PingContext(ctx); err != nil {
-		db.Close()
-		return nil, err
-	}
-	return db, nil
-}
-
-// listTables 返回当前数据库的所有表名。
-func listTables(ctx context.Context, db *sql.DB) ([]string, error) {
-	rows, err := db.QueryContext(ctx, "SHOW TABLES")
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-	var tables []string
-	for rows.Next() {
-		var name string
-		if err := rows.Scan(&name); err != nil {
-			return nil, err
-		}
-		tables = append(tables, name)
-	}
-	return tables, rows.Err()
-}
-
-// readTableColumns 读取单张表的字段信息，按定义顺序返回。
-func readTableColumns(ctx context.Context, db *sql.DB, table string) ([]columnInfo, error) {
-	rows, err := db.QueryContext(ctx, `
-SELECT COLUMN_NAME, DATA_TYPE, COLUMN_TYPE, IS_NULLABLE, COLUMN_KEY, COLUMN_DEFAULT, EXTRA, COLUMN_COMMENT
-FROM information_schema.columns
-WHERE table_schema = DATABASE() AND table_name = ?
-ORDER BY ORDINAL_POSITION`, table)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-	var columns []columnInfo
-	for rows.Next() {
-		var c columnInfo
-		var nullable string
-		var def sql.NullString
-		if err := rows.Scan(&c.Name, &c.DataType, &c.ColumnType, &nullable, &c.ColumnKey, &def, &c.Extra, &c.Comment); err != nil {
-			return nil, err
-		}
-		c.Nullable = strings.EqualFold(nullable, "YES")
-		if def.Valid {
-			c.Default = def.String
-		}
-		columns = append(columns, c)
-	}
-	if err := rows.Err(); err != nil {
-		return nil, err
-	}
-	if len(columns) == 0 {
-		return nil, fmt.Errorf("table %q not found in current database", table)
-	}
-	return columns, nil
-}
-
-// goTypeFor 将 MySQL 类型映射为 Go 类型。
+// goTypeFor 将常见 MySQL、SQLite 及兼容数据库类型映射为 Go 类型。
 func goTypeFor(dataType, columnType string) string {
 	switch dt := strings.ToLower(dataType); dt {
-	case "bigint":
+	case "bigint", "bigserial":
 		return "int64"
-	case "int", "integer", "mediumint":
+	case "int", "integer", "mediumint", "serial":
 		return "int"
 	case "smallint":
 		return "int16"
@@ -153,13 +72,15 @@ func goTypeFor(dataType, columnType string) string {
 		return "int8"
 	case "float":
 		return "float32"
-	case "double", "decimal", "numeric":
+	case "double", "double precision", "real", "decimal", "numeric":
 		return "float64"
-	case "varchar", "char", "enum", "set", "json", "text", "tinytext", "mediumtext", "longtext":
+	case "bool", "boolean":
+		return "bool"
+	case "varchar", "character varying", "char", "enum", "set", "json", "jsonb", "uuid", "text", "tinytext", "mediumtext", "longtext":
 		return "string"
-	case "datetime", "timestamp", "date", "time":
+	case "datetime", "timestamp", "timestamptz", "timestamp with time zone", "timestamp without time zone", "date", "time":
 		return "time.Time"
-	case "blob", "tinyblob", "mediumblob", "longblob", "binary", "varbinary":
+	case "blob", "tinyblob", "mediumblob", "longblob", "binary", "varbinary", "bytea":
 		return "[]byte"
 	default:
 		return "string"
@@ -169,7 +90,7 @@ func goTypeFor(dataType, columnType string) string {
 // isTimeType 判断字段是否映射为 time.Time。
 func isTimeType(dataType string) bool {
 	switch strings.ToLower(dataType) {
-	case "datetime", "timestamp", "date", "time":
+	case "datetime", "timestamp", "timestamptz", "timestamp with time zone", "timestamp without time zone", "date", "time":
 		return true
 	}
 	return false
@@ -178,7 +99,7 @@ func isTimeType(dataType string) bool {
 // isSortable 判断字段是否适合作为排序字段。
 func isSortable(dataType string) bool {
 	switch strings.ToLower(dataType) {
-	case "text", "tinytext", "mediumtext", "longtext", "blob", "tinyblob", "mediumblob", "longblob", "json", "binary", "varbinary":
+	case "text", "tinytext", "mediumtext", "longtext", "blob", "tinyblob", "mediumblob", "longblob", "json", "jsonb", "binary", "varbinary", "bytea":
 		return false
 	}
 	return true
@@ -187,7 +108,7 @@ func isSortable(dataType string) bool {
 // isIntegerType 判断字段是否为整形类型。
 func isIntegerType(dataType, columnType string) bool {
 	switch strings.ToLower(dataType) {
-	case "bigint", "int", "integer", "mediumint", "smallint":
+	case "bigint", "bigserial", "int", "integer", "mediumint", "serial", "smallint":
 		return true
 	case "tinyint":
 		return !strings.HasPrefix(strings.ToLower(columnType), "tinyint(1)")
@@ -203,7 +124,7 @@ func isListField(column string, isPrimary bool) bool {
 // isLikeQueryable 判断字符串字段是否适合 LIKE 过滤。
 func isLikeQueryable(dataType string) bool {
 	switch strings.ToLower(dataType) {
-	case "varchar", "char", "enum", "set":
+	case "varchar", "character varying", "char", "enum", "set", "text":
 		return true
 	}
 	return false

@@ -1,6 +1,8 @@
 package main
 
 import (
+	"context"
+	"path/filepath"
 	"strings"
 	"testing"
 )
@@ -18,6 +20,7 @@ func buildUserGroupColumns() []columnInfo {
 	}
 }
 
+// TestToGoName 验证数据库 snake_case 列名能够转换为项目约定的 Go 字段名。
 func TestToGoName(t *testing.T) {
 	cases := map[string]string{
 		"id":          "Id",
@@ -33,6 +36,7 @@ func TestToGoName(t *testing.T) {
 	}
 }
 
+// TestIntegerFieldSelection 验证 MySQL 和 SQLite 整形字段的查询条件入选规则。
 func TestIntegerFieldSelection(t *testing.T) {
 	tests := []struct {
 		dataType   string
@@ -56,14 +60,19 @@ func TestIntegerFieldSelection(t *testing.T) {
 	}
 }
 
+// TestGoTypeFor 验证 MySQL 和 SQLite 常用字段类型能够稳定映射为 Go 类型。
 func TestGoTypeFor(t *testing.T) {
 	cases := map[string]string{
 		"bigint":   "int64",
 		"int":      "int",
+		"integer":  "int",
 		"varchar":  "string",
 		"text":     "string",
 		"datetime": "time.Time",
 		"decimal":  "float64",
+		"real":     "float64",
+		"boolean":  "bool",
+		"blob":     "[]byte",
 	}
 	for dataType, want := range cases {
 		if got := goTypeFor(dataType, dataType); got != want {
@@ -75,6 +84,119 @@ func TestGoTypeFor(t *testing.T) {
 	}
 }
 
+// TestNormalizeDatabaseType 验证数据库类型规范化、旧调用默认值和非法类型校验。
+func TestNormalizeDatabaseType(t *testing.T) {
+	tests := []struct {
+		name    string
+		input   string
+		want    string
+		wantErr bool
+	}{
+		{name: "旧调用默认 MySQL", input: "", want: databaseTypeMySQL},
+		{name: "规范化 MySQL", input: " MySQL ", want: databaseTypeMySQL},
+		{name: "规范化 SQLite", input: "SQLITE", want: databaseTypeSQLite},
+		{name: "拒绝未支持类型", input: "postgres", wantErr: true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got, err := normalizeDatabaseType(tt.input)
+			if tt.wantErr {
+				if err == nil {
+					t.Fatalf("normalizeDatabaseType(%q) 应返回错误", tt.input)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("normalizeDatabaseType(%q) 返回错误: %v", tt.input, err)
+			}
+			if got != tt.want {
+				t.Errorf("normalizeDatabaseType(%q) = %q, want %q", tt.input, got, tt.want)
+			}
+		})
+	}
+}
+
+// TestSQLiteSchemaAndGeneration 验证 SQLite 表发现、字段读取和代码生成的完整链路。
+func TestSQLiteSchemaAndGeneration(t *testing.T) {
+	ctx := context.Background()
+	dsn := filepath.Join(t.TempDir(), "dao.sqlite")
+	database, err := connect(ctx, databaseTypeSQLite, dsn)
+	if err != nil {
+		t.Fatalf("连接临时 SQLite 数据库失败: %v", err)
+	}
+	defer closeDatabase(database)
+
+	// 使用 SQLite 的典型字段类型建表，覆盖主键、数值、布尔、二进制和时间映射。
+	ddl := `CREATE TABLE user_profile (
+		id INTEGER PRIMARY KEY AUTOINCREMENT,
+		account_id INTEGER NOT NULL,
+		display_name TEXT NOT NULL,
+		balance REAL NOT NULL DEFAULT 0,
+		enabled BOOLEAN NOT NULL DEFAULT 1,
+		payload BLOB,
+		created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
+	)`
+	if err := database.WithContext(ctx).Exec(ddl).Error; err != nil {
+		t.Fatalf("创建 SQLite 测试表失败: %v", err)
+	}
+
+	// AUTOINCREMENT 会创建 sqlite_sequence；业务接口不应把该内部表暴露给调用方。
+	tables, err := listTables(ctx, database)
+	if err != nil {
+		t.Fatalf("列举 SQLite 表失败: %v", err)
+	}
+	if len(tables) != 1 || tables[0] != "user_profile" {
+		t.Fatalf("listTables() = %v, want [user_profile]", tables)
+	}
+
+	columns, err := readTableColumns(ctx, database, "user_profile")
+	if err != nil {
+		t.Fatalf("读取 SQLite 表结构失败: %v", err)
+	}
+	columnsByName := make(map[string]columnInfo, len(columns))
+	for _, column := range columns {
+		columnsByName[column.Name] = column
+	}
+	if columnsByName["id"].ColumnKey != "PRI" {
+		t.Errorf("SQLite 主键未被识别: %+v", columnsByName["id"])
+	}
+
+	wantTypes := map[string]string{
+		"id":           "int",
+		"account_id":   "int",
+		"display_name": "string",
+		"balance":      "float64",
+		"enabled":      "bool",
+		"payload":      "[]byte",
+		"created_at":   "time.Time",
+	}
+	for name, wantType := range wantTypes {
+		column, ok := columnsByName[name]
+		if !ok {
+			t.Errorf("SQLite 列信息缺少 %q", name)
+			continue
+		}
+		if got := goTypeFor(column.DataType, column.ColumnType); got != wantType {
+			t.Errorf("列 %q 映射为 %q, want %q（数据库类型=%q）", name, got, wantType, column.ColumnType)
+		}
+	}
+
+	code, err := renderModel(buildTableModel("model", "user_profile", columns))
+	if err != nil {
+		t.Fatalf("根据 SQLite 表结构生成代码失败: %v\n%s", err, code)
+	}
+	compactCode := strings.Join(strings.Fields(code), " ")
+	for field, fieldType := range map[string]string{
+		"Id": "int", "AccountId": "int", "DisplayName": "string", "Balance": "float64",
+		"Enabled": "bool", "Payload": "[]byte", "CreatedAt": "time.Time",
+	} {
+		if !strings.Contains(compactCode, field+" "+fieldType+" `gorm:") {
+			t.Errorf("SQLite 生成代码缺少字段声明 %s %s", field, fieldType)
+		}
+	}
+}
+
+// TestRenderUserGroupModel 验证完整 DAO 模板包含约定的模型、筛选和事务方法。
 func TestRenderUserGroupModel(t *testing.T) {
 	m := buildTableModel("model", "user_group", buildUserGroupColumns())
 	code, err := renderModel(m)
